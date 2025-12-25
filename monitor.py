@@ -2,9 +2,19 @@ import requests
 import os
 import json
 import datetime
+import matplotlib.pyplot as plt
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 STATE_FILE = "state.json"
+LOG_FILE = "log.txt"
+GRAPH_FILE = "steam_history.png"
+
+SERVICES = [
+    "Steam Store",
+    "Steam Community",
+    "Steam Web API",
+    "Steam Connection Managers"
+]
 
 # -------------------------
 # STATE
@@ -12,7 +22,7 @@ STATE_FILE = "state.json"
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"last_global": None, "last_services": {}}
+        return {"last_global": None, "last_services": {}, "history": []}
     with open(STATE_FILE, "r") as f:
         return json.load(f)
 
@@ -21,51 +31,48 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 # -------------------------
-# HELPERS
+# LOGGING
 # -------------------------
 
-def is_bad(status: str) -> bool:
-    return status.lower() not in ["normal", "online"]
+def log(msg):
+    timestamp = datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+    print(f"[{timestamp}] {msg}")
+    with open(LOG_FILE, "a") as f:
+        f.write(f"[{timestamp}] {msg}\n")
 
-def get_steam_services_status():
+# -------------------------
+# STEAM STATUS SIMULADO
+# -------------------------
+
+def get_steam_status():
     """
-    Devuelve un dict con cada servicio de Steam y su estado.
+    Obtiene estado de los servicios de Steam.
+    Retorna dict con valores: 'Normal', 'No verificado', 'Problem'...
     """
-    url = "https://api.steampowered.com/ISteamApps/GetServersAtAddress/v1/"  # ejemplo de endpoint
-    # Nota: la Steam Web API no tiene endpoint público para todos los servicios.
-    # Vamos a simular con los servicios clásicos usando Steamstatus API unofficial
     services = {}
     try:
-        # usar un endpoint confiable: Steam Web API Status JSON
-        r = requests.get("https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v1/", timeout=10)
-        r.raise_for_status()
-        data = r.json()
-
-        # Simulamos servicios
-        services["Steam Store"] = "Normal"
-        services["Steam Community"] = "Normal"
-        services["Steam Web API"] = "Normal"
-        services["Steam Connection Managers"] = "Normal"
-
-        # Aquí se podrían mapear valores reales del JSON si el endpoint devuelve estados
-        # Para ahora, siempre enviamos Normal. Puedes reemplazar con tu endpoint real si existe.
+        # Aquí puedes usar un endpoint real si lo tienes.
+        # Por ahora simulamos todos online
+        for s in SERVICES:
+            services[s] = "Normal"
+        # Ejemplo de porcentaje para Connection Managers
+        services["Steam Connection Managers"] = "95.2% Online"
     except Exception as e:
-        print("⚠️ No se pudo obtener datos reales de la Web API:", e)
-        services = {
-            "Steam Store": "No verificado",
-            "Steam Community": "No verificado",
-            "Steam Web API": "No verificado",
-            "Steam Connection Managers": "No verificado"
-        }
+        log(f"Error obteniendo estado de Steam: {e}")
+        for s in SERVICES:
+            services[s] = "No verificado"
     return services
 
 # -------------------------
-# DISCORD WEBHOOK
+# EMBED DISCORD
 # -------------------------
 
-def send_webhook(services: dict, steam_down: bool):
+def is_bad(status: str) -> bool:
+    return "problem" in status.lower() or "offline" in status.lower() or "down" in status.lower()
+
+def send_discord_embed(services: dict, steam_down: bool):
     if not WEBHOOK_URL:
-        print("WEBHOOK_URL no configurado")
+        log("WEBHOOK_URL no configurado")
         return
 
     color = 15158332 if steam_down else 3066993
@@ -90,8 +97,30 @@ def send_webhook(services: dict, steam_down: bool):
 
     try:
         requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+        log("Embed enviado a Discord")
     except Exception as e:
-        print("Error enviando webhook:", e)
+        log(f"Error enviando embed a Discord: {e}")
+
+# -------------------------
+# GRAFICA DE HISTORICO
+# -------------------------
+
+def generate_graph(state):
+    history = state.get("history", [])
+    if not history:
+        return
+
+    timestamps = [datetime.datetime.strptime(h["timestamp"], "%Y-%m-%d %H:%M:%S") for h in history]
+    values = [100 if h["global"] == False else 0 for h in history]  # 100 online, 0 down
+
+    plt.figure(figsize=(10,2))
+    plt.plot(timestamps, values, marker="o")
+    plt.yticks([0,100], ["DOWN","ONLINE"])
+    plt.xticks(rotation=45)
+    plt.tight_layout()
+    plt.savefig(GRAPH_FILE)
+    plt.close()
+    log(f"Gráfica generada: {GRAPH_FILE}")
 
 # -------------------------
 # MAIN
@@ -99,20 +128,31 @@ def send_webhook(services: dict, steam_down: bool):
 
 def main():
     state = load_state()
+    services = get_steam_status()
 
-    services = get_steam_services_status()
+    steam_down = any(is_bad(s) for s in services.values())
 
-    steam_down = any(is_bad(status) for status in services.values())
+    # Compara con último estado global y servicios
+    last_global = state.get("last_global")
+    last_services = state.get("last_services", {})
 
-    if state.get("last_global") != steam_down:
-        send_webhook(services, steam_down)
+    changed = last_global != steam_down or any(last_services.get(k) != v for k,v in services.items())
+
+    if changed:
+        send_discord_embed(services, steam_down)
     else:
-        print("Sin cambios globales, no se envía Discord")
+        log("Sin cambios, no se envía Discord")
 
-    # guardar estado
+    # Guardar estado
     state["last_global"] = steam_down
     state["last_services"] = services
+
+    # Guardar histórico
+    history_entry = {"timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"), "global": steam_down}
+    state.setdefault("history", []).append(history_entry)
+
     save_state(state)
+    generate_graph(state)
 
 # -------------------------
 
