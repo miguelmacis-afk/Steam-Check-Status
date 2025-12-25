@@ -13,14 +13,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      - name: Install deps
+      - name: Install dependencies
         run: |
           pip install requests beautifulsoup4
 
@@ -29,10 +30,10 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python monitor.py
 
-      - name: Commit JSON
+      - name: Commit state
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add state.json history.json
-          git commit -m "Update Steam status [skip ci]" || echo "No changes"
+          git add state.json
+          git commit -m "Update Steam state [skip ci]" || echo "No changes"
           git push
