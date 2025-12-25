@@ -4,8 +4,9 @@ import requests
 from bs4 import BeautifulSoup
 from datetime import datetime
 import matplotlib.pyplot as plt
+import os
 
-WEBHOOK_URL = "TU_DISCORD_WEBHOOK_AQUI"  # O usa os.environ["WEBHOOK_URL"]
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Debe estar en Secrets
 STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
 GRAPH_FILE = Path("steam_history.png")
@@ -26,38 +27,43 @@ def get_steam_status():
     r.raise_for_status()
     soup = BeautifulSoup(r.text, "html.parser")
 
-    # Estado general
+    # Estado global
     overall_div = soup.find("div", class_="status-global")
-    overall = True
-    if overall_div and "down" in overall_div.get("class", []):
-        overall = False
+    if overall_div:
+        overall_online = "online" in overall_div.get("class", [])
+    else:
+        overall_online = True  # Default online
 
     # Estado por servicios
     services = {}
     service_divs = soup.select(".status-item")
     for div in service_divs:
-        name = div.select_one(".status-item__name").text.strip()
-        status_class = div.select_one(".status-item__status")["class"]
-        services[name] = "online" if "online" in status_class else "offline"
+        name_tag = div.select_one(".status-item__name")
+        status_tag = div.select_one(".status-item__status")
+        if name_tag and status_tag:
+            name = name_tag.text.strip()
+            classes = status_tag.get("class", [])
+            services[name] = "online" if "online" in classes else "offline"
 
-    return overall, services
+    # Devuelve True si Steam caído (para JSON)
+    return not overall_online, services
 
 # ---------------- Actualizar historial ----------------
-def update_history(overall):
+def update_history(overall_online):
     history = load_json(HISTORY_FILE, [])
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     if not history or history[-1].get("end") is not None:
-        if not overall:
+        if not overall_online:  # Nueva caída
             history.append({"start": now, "end": None})
     else:
-        if overall:
+        if overall_online:  # Termina caída
             history[-1]["end"] = now
     return history
 
 # ---------------- Generar gráfica ----------------
 def generate_graph(history):
     if not history:
-        # Crear gráfico vacío de ejemplo
+        # Gráfico vacío por defecto
         plt.figure(figsize=(10,2))
         plt.step([0,1],[1,1], where='post', color='red')
         plt.yticks([0,1], ["Down","Up"])
@@ -66,7 +72,6 @@ def generate_graph(history):
         plt.close()
         return
 
-    # Código normal para gráfica con historial
     times = []
     states = []
     for h in history:
@@ -80,20 +85,17 @@ def generate_graph(history):
     plt.close()
 
 # ---------------- Enviar webhook ----------------
-def send_webhook(overall, services):
+def send_webhook(overall_down, services):
     if not WEBHOOK_URL:
         return
     try:
         embed = {
-            "title": f"Steam Status Update - {'DOWN' if not overall else 'ONLINE'}",
-            "color": 15158332 if not overall else 3066993,
+            "title": f"Steam Status Update - {'DOWN' if overall_down else 'ONLINE'}",
+            "color": 15158332 if overall_down else 3066993,
             "fields": [{"name": k, "value": v, "inline": True} for k,v in services.items()]
         }
-        files = {"file": open(GRAPH_FILE, "rb")} if GRAPH_FILE.exists() else None
         data = {"embeds": [embed]}
-        r = requests.post(WEBHOOK_URL, json=data, timeout=10)
-        if files:
-            files["file"].close()
+        requests.post(WEBHOOK_URL, json=data, timeout=10)
     except Exception as e:
         print("Error enviando webhook:", e)
 
@@ -101,17 +103,19 @@ def send_webhook(overall, services):
 def main():
     last_state = load_json(STATE_FILE, {"down": True})
 
-    overall, services = get_steam_status()
-    history = update_history(overall)
+    overall_down, services = get_steam_status()
+    overall_online = not overall_down
+
+    history = update_history(overall_online)
     generate_graph(history)
 
     # Guardar siempre JSON
-    save_json(STATE_FILE, {"down": overall})
+    save_json(STATE_FILE, {"down": overall_down})
     save_json(HISTORY_FILE, history)
 
     # Enviar Discord solo si cambio de estado
-    if overall != last_state.get("down"):
-        send_webhook(overall, services)
+    if overall_down != last_state.get("down"):
+        send_webhook(overall_down, services)
 
 if __name__ == "__main__":
     main()
