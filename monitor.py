@@ -39,12 +39,16 @@ def get_steam_status():
     for div in service_divs:
         name_tag = div.select_one(".status-item__name")
         status_tag = div.select_one(".status-item__status")
-        if name_tag and status_tag:
+        if name_tag:
             name = name_tag.text.strip()
-            classes = status_tag.get("class", [])
-            services[name] = "Normal" if "online" in classes else "Problemas"
+            status = "Normal"
+            if status_tag:
+                cls = " ".join(status_tag.get("class", []))
+                if "offline" in cls or "major" in cls or "critical" in cls:
+                    status = "Problemas"
+            services[name] = status
 
-    return not overall_online, services  # True = down, False = online
+    return not overall_online, services
 
 # ---------------- Actualizar historial ----------------
 def update_history(overall_online):
