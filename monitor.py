@@ -31,24 +31,44 @@ def scrape_steamstat():
     r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=15)
     r.raise_for_status()
 
-    match = re.search(r'__INITIAL_STATE__\s*=\s*({.*?});', r.text, re.S)
-    if not match:
-        raise Exception("No se pudo leer estado interno de Steamstat")
-
-    data = json.loads(match.group(1))
     services = {}
 
-    for service in data["services"]:
-        name = service["name"]
-        status = service["status"]
-        services[name] = status
+    # 1️⃣ INTENTO: JSON interno (si existe)
+    match = re.search(r'__INITIAL_STATE__\s*=\s*({.*?});', r.text, re.S)
+    if match:
+        try:
+            data = json.loads(match.group(1))
+            for s in data.get("services", []):
+                services[s["name"]] = s["status"]
 
-    # Connection Managers
-    cm = data.get("connectionManagers", {})
-    if "onlinePercent" in cm:
-        services["Steam Connection Managers"] = f'{cm["onlinePercent"]}% Online'
+            cm = data.get("connectionManagers", {})
+            if "onlinePercent" in cm:
+                services["Steam Connection Managers"] = f'{cm["onlinePercent"]}% Online'
 
-    return services
+            if services:
+                return services
+        except Exception:
+            pass  # fallback abajo
+
+    # 2️⃣ FALLBACK: HTML scraping (funciona en Actions)
+    soup = BeautifulSoup(r.text, "html.parser")
+
+    for row in soup.find_all("tr"):
+        cols = row.find_all("td")
+        if len(cols) < 2:
+            continue
+
+        name = cols[0].get_text(strip=True)
+        status = cols[1].get_text(strip=True)
+
+        if name.lower().startswith("steam"):
+            services[name] = status
+
+    if services:
+        return services
+
+    # 3️⃣ SI TODO FALLA → NO ROMPER
+    raise Exception("Steamstat cambió el HTML, no se pudieron obtener servicios")
 def send_webhook(services, steam_down):
     if not WEBHOOK_URL:
         return
