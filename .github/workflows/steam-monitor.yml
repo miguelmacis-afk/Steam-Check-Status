@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Clonar repo con persistencia de credenciales
+      # 1️⃣ Clonar el repo con persistencia de credenciales
       - uses: actions/checkout@v3
         with:
           persist-credentials: true
@@ -44,7 +44,11 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
+          # Configura la URL remota para usar el token interno
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          # Agrega los JSON
           git add state.json history.json
+          # Commit si hay cambios
           git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
+          # Push al repo
           git push
