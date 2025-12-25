@@ -26,13 +26,22 @@ def save_json(path, data):
 
 # ---------------- Downdetector ----------------
 def get_downdetector_data():
-    r = requests.get("https://downdetector.com/status/steam/", timeout=10)
-    match = re.search(r'__NEXT_DATA__\s*=\s*({.*?});', r.text, re.S)
-    data = json.loads(match.group(1))
-    status = data["props"]["pageProps"]["dehydratedState"]["queries"][0]["state"]["data"]["status"]
-    reports = status["report"]
-    regions = [f"{r['name']} ({r['percent']}%)" for r in status.get("regions", []) if r['percent'] >= REGION_PERCENT_THRESHOLD]
+    headers = {"User-Agent": "Mozilla/5.0"}
+    url = "https://downdetector.com/status/steam/"
+    r = requests.get(url, headers=headers, timeout=10)
+    # Buscar la parte de JSON con status de forma robusta
+    if '"status"' not in r.text:
+        raise Exception("No se pudo leer datos de Downdetector")
+    # Extraer números de reportes de forma simple usando regex flexible
+    match = re.search(r'"report":\s*(\d+)', r.text)
+    if not match:
+        raise Exception("No se pudo leer reportes de Downdetector")
+    reports = int(match.group(1))
+    # Regiones (opcional)
+    region_matches = re.findall(r'"name":"(.*?)","percent":(\d+)', r.text)
+    regions = [f"{name} ({percent}%)" for name, percent in region_matches if int(percent) >= 20]
     return reports, regions
+
 
 # ---------------- History / Graph ----------------
 def update_history(reports, regions, current_status, last_state):
