@@ -1,73 +1,67 @@
 import requests
-import json
 import os
-from datetime import datetime
+import json
+import datetime
 from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+STATE_FILE = "state.json"
+
+BAD_KEYWORDS = ["outage", "offline", "issues", "problem", "down"]
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
 }
 
-STATE_FILE = "state.json"
-HISTORY_FILE = "history.json"
+def load_state():
+    if not os.path.exists(STATE_FILE):
+        return {"last_status": None}
+    with open(STATE_FILE, "r") as f:
+        return json.load(f)
 
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
 
-def get_steam_status():
+def is_bad(status):
+    return any(bad in status.lower() for bad in BAD_KEYWORDS)
+
+def scrape_steamstat():
     r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=15)
     r.raise_for_status()
 
     soup = BeautifulSoup(r.text, "html.parser")
+    services = {}
 
-    services = {
-        "Steam Store": "Normal ✅",
-        "Steam Community": "Normal ✅",
-        "Steam Web API": "Normal ✅",
-        "Steam Connection Managers": "Normal ✅"
-    }
+    rows = soup.select("table.service-table tr")[1:]
+    for row in rows:
+        cols = row.find_all("td")
+        if len(cols) >= 2:
+            name = cols[0].get_text(strip=True)
+            status = cols[1].get_text(strip=True)
+            services[name] = status
 
-    for row in soup.select(".service"):
-        name = row.select_one(".name")
-        status = row.select_one(".status")
+    return services
 
-        if not name or not status:
-            continue
-
-        service_name = name.text.strip()
-        service_status = status.text.strip()
-
-        if service_name in services:
-            services[service_name] = service_status
-
-    overall_down = any(v != "Normal ✅" for v in services.values())
-    return overall_down, services
-
-
-def load_json(path, default):
-    if not os.path.exists(path):
-        return default
-    with open(path, "r", encoding="utf-8") as f:
-        return json.load(f)
-
-
-def save_json(path, data):
-    with open(path, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-
-
-def send_discord(overall_down, services):
+def send_webhook(services, steam_down):
     if not WEBHOOK_URL:
         return
 
-    title = "Steam ONLINE ✅" if not overall_down else "Steam DOWN ❌"
-    color = 0x57F287 if not overall_down else 0xED4245
+    color = 15158332 if steam_down else 3066993
+    title = "Steam DOWN ❌" if steam_down else "Steam ONLINE ✅"
 
     fields = []
     for name, status in services.items():
+        if is_bad(status):
+            emoji = "🔴"
+        elif "%" in status:
+            emoji = "🟡"
+        else:
+            emoji = "🟢"
+
         fields.append({
             "name": name,
-            "value": status,
+            "value": f"{emoji} {status}",
             "inline": False
         })
 
@@ -76,36 +70,26 @@ def send_discord(overall_down, services):
         "color": color,
         "fields": fields,
         "footer": {
-            "text": datetime.now().strftime("%Y-%m-%d %H:%M")
+            "text": f"Actualizado: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
         }
     }
 
-    r = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
-    if r.status_code not in (200, 204):
-        print("Discord error:", r.status_code, r.text)
-
+    requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
 
 def main():
-    overall_down, services = get_steam_status()
+    services = scrape_steamstat()
+    steam_down = any(is_bad(s) for s in services.values())
 
-    state = load_json(STATE_FILE, {})
-    history = load_json(HISTORY_FILE, [])
+    state = load_state()
 
-    current_state = {
-        "down": overall_down,
-        "services": services
-    }
+    if state["last_status"] == steam_down:
+        print("Sin cambios, no se envía aviso.")
+        return
 
-    if state != current_state:
-        send_discord(overall_down, services)
-        save_json(STATE_FILE, current_state)
+    send_webhook(services, steam_down)
 
-        history.append({
-            "time": datetime.now().isoformat(),
-            "down": overall_down
-        })
-        save_json(HISTORY_FILE, history)
-
+    state["last_status"] = steam_down
+    save_state(state)
 
 if __name__ == "__main__":
     main()
