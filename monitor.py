@@ -2,6 +2,7 @@ import requests
 import os
 import json
 import datetime
+import re
 from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -30,20 +31,22 @@ def scrape_steamstat():
     r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=15)
     r.raise_for_status()
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    match = re.search(r'__INITIAL_STATE__\s*=\s*({.*?});', r.text, re.S)
+    if not match:
+        raise Exception("No se pudo leer estado interno de Steamstat")
+
+    data = json.loads(match.group(1))
     services = {}
 
-    # Servicios principales
-    for row in soup.select("table tr"):
-        cols = row.find_all("td")
-        if len(cols) < 2:
-            continue
+    for service in data["services"]:
+        name = service["name"]
+        status = service["status"]
+        services[name] = status
 
-        name = cols[0].get_text(strip=True)
-        status = cols[1].get_text(strip=True)
-
-        if name and status:
-            services[name] = status
+    # Connection Managers
+    cm = data.get("connectionManagers", {})
+    if "onlinePercent" in cm:
+        services["Steam Connection Managers"] = f'{cm["onlinePercent"]}% Online'
 
     return services
 def send_webhook(services, steam_down):
