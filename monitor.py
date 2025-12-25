@@ -33,16 +33,19 @@ def scrape_steamstat():
     soup = BeautifulSoup(r.text, "html.parser")
     services = {}
 
-    rows = soup.select("table.service-table tr")[1:]
-    for row in rows:
+    # Servicios principales
+    for row in soup.select("table tr"):
         cols = row.find_all("td")
-        if len(cols) >= 2:
-            name = cols[0].get_text(strip=True)
-            status = cols[1].get_text(strip=True)
+        if len(cols) < 2:
+            continue
+
+        name = cols[0].get_text(strip=True)
+        status = cols[1].get_text(strip=True)
+
+        if name and status:
             services[name] = status
 
     return services
-
 def send_webhook(services, steam_down):
     if not WEBHOOK_URL:
         return
