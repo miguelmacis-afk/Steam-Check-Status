@@ -3,17 +3,32 @@ name: Steam Status Monitor
 on:
   schedule:
     - cron: "*/5 * * * *"  # Cada 5 minutos (UTC)
-  workflow_dispatch:        # También puedes lanzarlo manualmente
+  workflow_dispatch:        # También se puede ejecutar manualmente
 
 jobs:
   check-steam:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
-      - uses: actions/setup-python@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-      - run: pip install requests matplotlib
-      - run: python monitor.py
+
+      - name: Install dependencies
+        run: pip install requests matplotlib
+
+      - name: Run Steamstat monitor
+        run: python monitor.py
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
+
+      # ------------------ Commit automático ------------------
+      - name: Commit JSON history
+        run: |
+          git config user.name "github-actions"
+          git config user.email "actions@github.com"
+          git add history.json state.json
+          git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
+          git push
