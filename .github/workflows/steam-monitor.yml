@@ -2,25 +2,18 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # cada 5 min
+    - cron: "*/5 * * * *"
   workflow_dispatch:
 
 jobs:
   check-steam:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v3
-
-      - name: Set up Python
-        uses: actions/setup-python@v4
+      - uses: actions/checkout@v3
+      - uses: actions/setup-python@v4
         with:
           python-version: "3.11"
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt
-
-      - name: Run Steam Monitor
-        run: python monitor.py
+      - run: pip install requests matplotlib
+      - run: python monitor.py
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
