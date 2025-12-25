@@ -10,10 +10,10 @@ LOG_FILE = "log.txt"
 GRAPH_FILE = "steam_history.png"
 
 SERVICES = [
-    "Steam Store",
+    "Steam Connection Managers",
     "Steam Community",
     "Steam Web API",
-    "Steam Connection Managers",
+    "Steam Store",
     "Steam Cloud",
     "Steam Workshop",
     "Steam Market",
@@ -84,22 +84,30 @@ def send_discord_embed(services: dict, steam_down: bool):
     color = 15158332 if steam_down else 3066993
     title = "Steam DOWN ❌" if steam_down else "Steam ONLINE ✅"
 
-    fields = []
-    for name, status in services.items():
-        if is_bad(status):
-            emoji = "🔴"
-        elif "%" in status:
-            emoji = "🟡"
-        else:
-            emoji = "🟢"
-        fields.append({"name": name, "value": f"{emoji} {status}", "inline": False})
+    lines = []
+
+for name, status in services.items():
+    if is_bad(status):
+        emoji = "🔴"
+    elif "%" in status:
+        emoji = "🟡"
+    else:
+        emoji = "🟢"
+
+    lines.append(f"{emoji} **{name}**: {status}")
+
+description = "\n".join(lines)
+
 
     embed = {
-        "title": title,
-        "color": color,
-        "fields": fields,
-        "footer": {"text": f"Actualizado: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"}
+    "title": title,
+    "description": description,
+    "color": color,
+    "footer": {
+        "text": f"Actualizado: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
     }
+}
+
 
     try:
         requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
