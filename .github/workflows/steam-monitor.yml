@@ -2,43 +2,49 @@ name: Steam Status Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # cada 5 min UTC
-  workflow_dispatch:
+    - cron: "*/5 * * * *"  # Cada 5 minutos (UTC)
+  workflow_dispatch:        # Permite ejecución manual
 
 jobs:
   check-steam:
     runs-on: ubuntu-latest
+
     steps:
+      # 1️⃣ Clonar repo con persistencia de credenciales
       - uses: actions/checkout@v3
         with:
-          persist-credentials: true  # <--- Muy importante para poder push
+          persist-credentials: true
 
+      # 2️⃣ Inicializar JSON vacíos si no existen
       - name: Initialize JSON files
         run: |
           [ -f state.json ] || echo '{}' > state.json
           [ -f history.json ] || echo '[]' > history.json
 
+      # 3️⃣ Configurar Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.11"
 
+      # 4️⃣ Instalar dependencias
       - name: Install dependencies
         run: pip install requests matplotlib
 
+      # 5️⃣ Ejecutar monitor.py
       - name: Run Steamstat monitor
         run: python monitor.py
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
 
+      # 6️⃣ Commit seguro de JSON al repo usando GITHUB_TOKEN
       - name: Commit JSON history
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          if [ -f state.json ] && [ -f history.json ]; then
-            git add state.json history.json
-            git commit -m "Update Steam history [skip ci]" || echo "No changes"
-            git push
-          else
-            echo "JSON files not found, skipping commit"
-          fi
+          git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
+          git add state.json history.json
+          git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
+          git push
