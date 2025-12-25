@@ -122,17 +122,15 @@ def main():
     status = get_steamstat_status()
     overall = is_overall_down(status)
 
-    # Actualiza historial y genera gráfica siempre
+    # Siempre actualizar historial y JSON aunque no haya cambios
     history = update_history(overall, status)
     generate_graph(history)
-
-    # Envía webhook solo si cambió el estado
-    if overall != last_state.get("down"):
-        send_webhook(status, overall)
-
-    # Guarda siempre los JSON
     save_json(STATE_FILE, {"down": overall})
     save_json(HISTORY_FILE, history)
 
+    # Enviar webhook solo si cambió el estado
+    if overall != last_state.get("down"):
+        send_webhook(status, overall)
+        
 if __name__ == "__main__":
     main()
