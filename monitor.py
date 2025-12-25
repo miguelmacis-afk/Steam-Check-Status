@@ -87,13 +87,16 @@ def send_webhook(overall_down, services):
         return
     try:
         status_text = "Steam ONLINE ✅" if not overall_down else "Steam DOWN ❌"
-        # Texto legible con saltos de línea
-        description = "\n".join([f"{k}: {v}" for k, v in services.items()])
+
+        # Cada servicio como field
+        fields = [{"name": k, "value": v, "inline": False} for k, v in services.items()]
+
         embed = {
             "title": status_text,
-            "description": description,
+            "fields": fields,
             "color": 3066993 if not overall_down else 15158332
         }
+
         requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
     except Exception as e:
         print("Error enviando webhook:", e)
