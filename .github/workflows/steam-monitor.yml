@@ -3,7 +3,7 @@ name: Steam Monitor
 on:
   schedule:
     - cron: "*/5 * * * *"  # cada 5 minutos
-  workflow_dispatch:       # permite ejecutar manualmente
+  workflow_dispatch:
 
 jobs:
   check-steam:
@@ -21,6 +21,6 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run Steam Monitor
+        run: python monitor.py
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
-        run: python monitor.py
