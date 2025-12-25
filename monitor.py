@@ -10,8 +10,7 @@ STATE_FILE = "state.json"
 GRAPH_FILE = "steam_history.png"
 LOG_FILE = "log.txt"
 
-# ORDEN DEFINITIVO
-SERVICES_ORDER = [
+SERVICES = [
     "Steam Connection Managers",
     "Steam Store",
     "Steam Community",
@@ -21,6 +20,8 @@ SERVICES_ORDER = [
     "Steam Market",
     "Steam Support"
 ]
+
+REGIONS = ["NA", "EU", "ASIA"]
 
 # -------------------------
 # LOG
@@ -39,8 +40,9 @@ def log(msg):
 def load_state():
     if not os.path.exists(STATE_FILE):
         return {
-            "last_global": None,
             "last_services": {},
+            "last_global": None,
+            "last_ok_since": None,
             "history": []
         }
     with open(STATE_FILE, "r") as f:
@@ -58,80 +60,45 @@ def is_bad(status: str) -> bool:
     s = status.lower()
     return "down" in s or "offline" in s or "problem" in s
 
+def emoji(status):
+    if is_bad(status):
+        return "🔴"
+    if "%" in status:
+        return "🟡"
+    return "🟢"
+
 # -------------------------
-# STEAM STATUS
+# STEAM STATUS (SIMULADO ESTABLE)
 # -------------------------
 
 def get_steam_status():
-    """
-    Sustituible por scraping real.
-    Actualmente estable y funcional.
-    """
     services = {}
 
-    for s in SERVICES_ORDER:
+    for s in SERVICES:
         services[s] = "Normal"
 
-    # Porcentaje realista
     services["Steam Connection Managers"] = "95.2% Online"
 
+    # Regiones
+    for r in REGIONS:
+        services[f"Region {r}"] = "Normal"
+
     return services
-
-# -------------------------
-# DISCORD
-# -------------------------
-
-def send_discord_embed(services, steam_down):
-    if not WEBHOOK_URL:
-        log("WEBHOOK_URL no configurado")
-        return
-
-    color = 15158332 if steam_down else 3066993
-    title = "Steam DOWN ❌" if steam_down else "Steam ONLINE ✅"
-
-    lines = []
-
-    for name in SERVICES_ORDER:
-        status = services.get(name, "Desconocido")
-
-        if is_bad(status):
-            emoji = "🔴"
-        elif "%" in status:
-            emoji = "🟡"
-        else:
-            emoji = "🟢"
-
-        lines.append(f"{emoji} **{name}**: {status}")
-
-    embed = {
-        "title": title,
-        "description": "\n".join(lines),
-        "color": color,
-        "footer": {
-            "text": f"Actualizado: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-        }
-    }
-
-    try:
-        requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
-        log("Embed enviado a Discord")
-    except Exception as e:
-        log(f"Error enviando embed: {e}")
 
 # -------------------------
 # GRAPH
 # -------------------------
 
 def generate_graph(state):
-    history = state.get("history", [])
+    history = state["history"]
     if not history:
-        return
+        return False
 
     times = [
         datetime.datetime.strptime(h["timestamp"], "%Y-%m-%d %H:%M:%S")
         for h in history
     ]
-    values = [0 if h["global"] else 100 for h in history]
+    values = [100 if not h["global"] else 0 for h in history]
 
     plt.figure(figsize=(10, 2))
     plt.plot(times, values, marker="o")
@@ -140,6 +107,42 @@ def generate_graph(state):
     plt.tight_layout()
     plt.savefig(GRAPH_FILE)
     plt.close()
+    return True
+
+# -------------------------
+# DISCORD
+# -------------------------
+
+def send_discord(services, steam_down, uptime, graph_exists):
+    title = "Steam DOWN ❌" if steam_down else "Steam ONLINE ✅"
+    color = 15158332 if steam_down else 3066993
+
+    lines = []
+    for s in services:
+        lines.append(f"{emoji(services[s])} **{s}**: {services[s]}")
+
+    description = "\n".join(lines)
+
+    if uptime:
+        description += f"\n\n⏱️ **Uptime:** {uptime}"
+
+    embed = {
+        "title": title,
+        "description": description,
+        "color": color,
+        "footer": {
+            "text": f"Actualizado: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
+        }
+    }
+
+    payload = {"embeds": [embed]}
+
+    if graph_exists:
+        with open(GRAPH_FILE, "rb") as f:
+            files = {"file": ("steam_history.png", f, "image/png")}
+            requests.post(WEBHOOK_URL, data={"payload_json": json.dumps(payload)}, files=files)
+    else:
+        requests.post(WEBHOOK_URL, json=payload)
 
 # -------------------------
 # MAIN
@@ -151,29 +154,41 @@ def main():
 
     steam_down = any(is_bad(s) for s in services.values())
 
-    last_global = state.get("last_global")
-    last_services = state.get("last_services", {})
-
     changed = (
-        last_global != steam_down or
-        any(last_services.get(k) != v for k, v in services.items())
+        state["last_global"] != steam_down or
+        state["last_services"] != services
     )
 
-    if changed:
-        send_discord_embed(services, steam_down)
-    else:
-        log("Sin cambios, no se envía Discord")
+    now = datetime.datetime.utcnow()
 
-    state["last_global"] = steam_down
+    if not steam_down:
+        if not state["last_ok_since"]:
+            state["last_ok_since"] = now.isoformat()
+    else:
+        state["last_ok_since"] = None
+
+    uptime = None
+    if state["last_ok_since"]:
+        delta = now - datetime.datetime.fromisoformat(state["last_ok_since"])
+        uptime = str(delta).split(".")[0]
+
     state["last_services"] = services
+    state["last_global"] = steam_down
 
     state["history"].append({
-        "timestamp": datetime.datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S"),
+        "timestamp": now.strftime("%Y-%m-%d %H:%M:%S"),
         "global": steam_down
     })
 
     save_state(state)
-    generate_graph(state)
+
+    graph_exists = generate_graph(state)
+
+    if changed:
+        send_discord(services, steam_down, uptime, graph_exists)
+        log("Estado cambiado → enviado a Discord")
+    else:
+        log("Sin cambios")
 
 # -------------------------
 
