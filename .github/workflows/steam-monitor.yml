@@ -2,7 +2,7 @@ name: Steam Status Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
+    - cron: "*/5 * * * *"  # cada 5 min UTC
   workflow_dispatch:
 
 jobs:
@@ -10,11 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          persist-credentials: true  # <--- Muy importante para poder push
 
       - name: Initialize JSON files
         run: |
-          echo '{}' > state.json
-          echo '[]' > history.json
+          [ -f state.json ] || echo '{}' > state.json
+          [ -f history.json ] || echo '[]' > history.json
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -33,6 +35,10 @@ jobs:
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add state.json history.json
-          git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
-          git push
+          if [ -f state.json ] && [ -f history.json ]; then
+            git add state.json history.json
+            git commit -m "Update Steam history [skip ci]" || echo "No changes"
+            git push
+          else
+            echo "JSON files not found, skipping commit"
+          fi
