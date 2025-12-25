@@ -74,8 +74,13 @@ def scrape_steamstat():
             services[name] = status
 
     if not services:
-        print("⚠️ Steamstat no devolvió servicios (HTML vacío)")
-        return None
+    print("No hay servicios disponibles, enviando estado no verificado")
+    services = {
+        "Steam Store": "Estado no verificado",
+        "Steam Community": "Estado no verificado",
+        "Steam Web API": "Estado no verificado",
+        "Steam Connection Managers": "Estado no verificado"
+    }
 
     return services
 
