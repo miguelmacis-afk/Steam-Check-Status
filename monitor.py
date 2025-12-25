@@ -56,7 +56,7 @@ def update_history(overall):
 
 # ---------------- Generar gráfica ----------------
 def generate_graph(history):
-        if not history:
+    if not history:
         # Crear gráfico vacío de ejemplo
         plt.figure(figsize=(10,2))
         plt.step([0,1],[1,1], where='post', color='red')
@@ -65,18 +65,19 @@ def generate_graph(history):
         plt.savefig(GRAPH_FILE)
         plt.close()
         return
+
+    # Código normal para gráfica con historial
     times = []
     states = []
     for h in history:
         times.append(datetime.strptime(h["start"], "%Y-%m-%d %H:%M:%S"))
         states.append(0 if h["end"] is None else 1)
-    if times:
-        plt.figure(figsize=(10,2))
-        plt.step(times, states, where='post', color='red')
-        plt.yticks([0,1], ["Down","Up"])
-        plt.title("Historial de caídas de Steam")
-        plt.savefig(GRAPH_FILE)
-        plt.close()
+    plt.figure(figsize=(10,2))
+    plt.step(times, states, where='post', color='red')
+    plt.yticks([0,1], ["Down","Up"])
+    plt.title("Historial de caídas de Steam")
+    plt.savefig(GRAPH_FILE)
+    plt.close()
 
 # ---------------- Enviar webhook ----------------
 def send_webhook(overall, services):
