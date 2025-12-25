@@ -6,13 +6,11 @@ from pathlib import Path
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 
-# ============== Config ==============
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
 GRAPH_FILE = "steamstat_status.png"
 
-# ------------------------------------
 HEADERS = {
     "User-Agent": 
       "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -28,7 +26,6 @@ SERVICES = [
     "Steam Connection Managers"
 ]
 
-# ---------- Utils ----------
 def load_json(path, default):
     if path.exists():
         return json.loads(path.read_text())
@@ -37,7 +34,6 @@ def load_json(path, default):
 def save_json(path, data):
     path.write_text(json.dumps(data, indent=2))
 
-# ---------- Scraping ----------
 def get_steamstat_status():
     url = "https://steamstat.us/"
     r = requests.get(url, headers=HEADERS, timeout=15)
@@ -54,11 +50,9 @@ def get_steamstat_status():
             status[svc] = "Unknown"
     return status
 
-# ---------- Decide if Steam overall is down ----------
 def is_overall_down(status):
     return any(val.lower() != "normal" for val in status.values())
 
-# ---------- History & Graph ----------
 def update_history(down_flag, status):
     history = load_json(HISTORY_FILE, [])
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
@@ -97,7 +91,6 @@ def generate_graph(history):
     plt.savefig(GRAPH_FILE)
     plt.close()
 
-# ---------- Discord ----------
 def send_webhook(status, overall):
     color = 0xFF0000 if overall else 0x00FF00
     title = "🔴 Steam CAÍDO" if overall else "🟢 Steam ONLINE"
@@ -117,11 +110,10 @@ def send_webhook(status, overall):
 
     files = None
     if Path(GRAPH_FILE).exists():
-        files = {"file": open(GRAPH_FILE, "rb")}
+        files = {"file": open(GRAPH_FILE,"rb")}
 
     requests.post(WEBHOOK_URL, data={"payload_json": json.dumps(payload)}, files=files)
 
-# ---------- Main ----------
 def main():
     if not WEBHOOK_URL:
         raise RuntimeError("WEBHOOK_URL no está definido")
