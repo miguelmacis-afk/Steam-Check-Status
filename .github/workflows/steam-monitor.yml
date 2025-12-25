@@ -38,7 +38,7 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
 
-      # 6️⃣ Commit seguro de JSON al repo usando GITHUB_TOKEN
+      # 6️⃣ Commit seguro de JSON y gráfica usando GITHUB_TOKEN
       - name: Commit JSON history
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -46,6 +46,7 @@ jobs:
           git config user.name "github-actions"
           git config user.email "actions@github.com"
           git remote set-url origin https://x-access-token:${GITHUB_TOKEN}@github.com/${{ github.repository }}.git
-          git add state.json history.json steam_history.png
+          git add state.json history.json
+          [ -f steam_history.png ] && git add steam_history.png
           git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
           git push
