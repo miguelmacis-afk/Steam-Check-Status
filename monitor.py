@@ -42,12 +42,12 @@ def get_steam_status():
         status_tag = div.select_one(".status-item__status")
         if name_tag:
             name = name_tag.text.strip()
-            status = "Normal"  # Valor por defecto
+            status = "Normal ✅"  # Valor por defecto
             if status_tag:
                 cls = " ".join(status_tag.get("class", []))
                 # Si la clase contiene algo que indique problemas
                 if any(x in cls for x in ["offline", "major", "critical"]):
-                    status = "Problemas"
+                    status = "Problemas ❌"
             services[name] = status
 
     # En caso de que no detecte servicios, añadimos manualmente los principales
