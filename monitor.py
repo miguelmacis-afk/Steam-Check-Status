@@ -87,7 +87,7 @@ def send_webhook(overall_down, services):
         return
     try:
         status_text = "Steam DOWN ❌" if overall_down else "Steam ONLINE ✅"
-        # Texto legible sin la hora
+        # Texto legible con servicios
         fields_text = "\n".join([f"{k}: {v}" for k, v in services.items()])
         embed = {
             "title": status_text,
