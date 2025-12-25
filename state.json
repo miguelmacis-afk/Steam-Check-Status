@@ -1,4 +1,9 @@
 {
-  "last_global": null,
-  "last_services": {}
+  "last_global": false,
+  "last_services": {
+    "Steam Store": "Estado no verificado",
+    "Steam Community": "Estado no verificado",
+    "Steam Web API": "Estado no verificado",
+    "Steam Connection Managers": "Estado no verificado"
+  }
 }
