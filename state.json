@@ -1,9 +1,9 @@
 {
-  "down": false,
+  "down": true,
   "services": {
-    "Steam Store": "Noermal",
-    "Steam Community": "Neormal",
-    "Steam Web API": "Neormal",
+    "Steam Store": "Normal",
+    "Steam Community": "Normal",
+    "Steam Web API": "Normal",
     "Steam Connection Managers": "95.2% Online"
   }
 }
