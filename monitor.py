@@ -18,9 +18,7 @@ STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
 GRAPH_FILE = "steam_reports.png"
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0"
-}
+HEADERS = {"User-Agent": "Mozilla/5.0"}
 
 # ---------- Utils ----------
 def load_json(path, default):
@@ -57,37 +55,66 @@ def get_downdetector_data():
     return reports, regions
 
 # ---------- History / Graph ----------
-def update_history(reports):
+def update_history(reports, regions, status_changed):
     history = load_json(HISTORY_FILE, [])
+
     now = datetime.utcnow()
 
-    history.append({
-        "time": now.strftime("%Y-%m-%d %H:%M"),
-        "reports": reports
-    })
+    # Si acaba de empezar caída, agregar inicio
+    if status_changed == "DOWN":
+        history.append({
+            "start": now.strftime("%Y-%m-%d %H:%M"),
+            "end": None,
+            "max_reports": reports,
+            "regions": regions
+        })
+    # Si está cayendo, actualizar máximo
+    elif status_changed == "ONGOING" and history:
+        last = history[-1]
+        last["max_reports"] = max(last["max_reports"], reports)
+        last["regions"] = list(set(last["regions"] + regions))
 
-    cutoff = now - timedelta(hours=24)
+    # Si recuperación, cerrar último evento
+    elif status_changed == "UP" and history:
+        last = history[-1]
+        if last["end"] is None:
+            last["end"] = now.strftime("%Y-%m-%d %H:%M")
+            last["max_reports"] = max(last["max_reports"], reports)
+            last["regions"] = regions
+
+    # Guardar solo últimos 7 días
+    cutoff = now - timedelta(days=7)
     history = [
         h for h in history
-        if datetime.strptime(h["time"], "%Y-%m-%d %H:%M") > cutoff
+        if datetime.strptime(h["start"], "%Y-%m-%d %H:%M") > cutoff
     ]
 
     save_json(HISTORY_FILE, history)
     return history
 
 def generate_graph(history):
-    times = [h["time"] for h in history]
-    values = [h["reports"] for h in history]
+    times = []
+    values = []
+    for h in history:
+        start = datetime.strptime(h["start"], "%Y-%m-%d %H:%M")
+        end = datetime.strptime(h["end"], "%Y-%m-%d %H:%M") if h["end"] else datetime.utcnow()
+        times.append(start)
+        values.append(h["max_reports"])
+        times.append(end)
+        values.append(h["max_reports"])
+
+    if not times:
+        return
 
     plt.figure(figsize=(10, 4))
-    plt.plot(times, values)
-    plt.axhline(REPORT_THRESHOLD)
+    plt.plot(times, values, marker='o')
+    plt.axhline(REPORT_THRESHOLD, color='red', linestyle='--', label='Threshold')
     plt.xticks(rotation=45)
     plt.tight_layout()
-    plt.title("Steam – Reportes Downdetector (24h)")
+    plt.title("Steam – Reportes Downdetector (Últimos 7 días)")
     plt.ylabel("Reportes")
     plt.xlabel("Hora")
-
+    plt.legend()
     plt.savefig(GRAPH_FILE)
     plt.close()
 
@@ -111,41 +138,55 @@ def send_webhook(status, reports, regions, attach_graph):
         }]
     }
 
-    if attach_graph:
-        with open(GRAPH_FILE, "rb") as f:
-            requests.post(
-                WEBHOOK_URL,
-                data={"payload_json": json.dumps(payload)},
-                files={"file": f},
-                timeout=10
-            )
-    else:
-        requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    try:
+        if attach_graph and Path(GRAPH_FILE).exists():
+            with open(GRAPH_FILE, "rb") as f:
+                requests.post(
+                    WEBHOOK_URL,
+                    data={"payload_json": json.dumps(payload)},
+                    files={"file": f},
+                    timeout=10
+                )
+        else:
+            requests.post(WEBHOOK_URL, json=payload, timeout=10)
+    except Exception as e:
+        print("Error enviando webhook:", e)
 
 # ---------- Main loop ----------
 def main():
     if not WEBHOOK_URL:
         raise RuntimeError("WEBHOOK_URL no está definido")
 
-    state = load_json(STATE_FILE, {"status": "UNKNOWN", "regions": []})
+    state = load_json(STATE_FILE, {"status": "UP", "regions": []})
 
     while True:
         try:
             reports, regions = get_downdetector_data()
-            history = update_history(reports)
 
-            current_status = "DOWN" if reports >= REPORT_THRESHOLD else "UP"
+            # Determinar cambio de estado
+            if reports >= REPORT_THRESHOLD:
+                if state["status"] != "DOWN":
+                    status_change = "DOWN"  # inicio de caída
+                else:
+                    status_change = "ONGOING"
+            else:
+                if state["status"] == "DOWN":
+                    status_change = "UP"    # recuperación
+                else:
+                    status_change = None    # sin cambio
 
-            if (
-                current_status != state["status"] or
-                regions != state["regions"]
-            ):
+            if status_change:
+                history = update_history(reports, regions, status_change)
                 generate_graph(history)
-                send_webhook(current_status, reports, regions, attach_graph=True)
-                save_json(STATE_FILE, {
-                    "status": current_status,
-                    "regions": regions
-                })
+                send_webhook(
+                    "DOWN" if reports >= REPORT_THRESHOLD else "UP",
+                    reports,
+                    regions,
+                    attach_graph=True
+                )
+                state["status"] = "DOWN" if reports >= REPORT_THRESHOLD else "UP"
+                state["regions"] = regions
+                save_json(STATE_FILE, state)
 
             time.sleep(CHECK_INTERVAL)
 
