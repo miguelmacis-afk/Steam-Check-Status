@@ -74,13 +74,8 @@ def scrape_steamstat():
             services[name] = status
 
     if not services:
-    print("No hay servicios disponibles, enviando estado no verificado")
-    services = {
-        "Steam Store": "Estado no verificado",
-        "Steam Community": "Estado no verificado",
-        "Steam Web API": "Estado no verificado",
-        "Steam Connection Managers": "Estado no verificado"
-    }
+        print("⚠️ Steamstat no devolvió servicios (HTML vacío)")
+        return None
 
     return services
 
@@ -143,9 +138,15 @@ def main():
         print("Usando último estado guardado")
         services = state.get("last_services", {})
 
+    # si aún no hay servicios (primer run o primer fallo)
     if not services:
-        print("No hay servicios disponibles, se aborta envío")
-        return
+        print("No hay servicios disponibles, enviando estado no verificado")
+        services = {
+            "Steam Store": "Estado no verificado",
+            "Steam Community": "Estado no verificado",
+            "Steam Web API": "Estado no verificado",
+            "Steam Connection Managers": "Estado no verificado"
+        }
 
     steam_down = any(is_bad(status) for status in services.values())
 
