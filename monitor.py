@@ -56,6 +56,15 @@ def update_history(overall):
 
 # ---------------- Generar gráfica ----------------
 def generate_graph(history):
+        if not history:
+        # Crear gráfico vacío de ejemplo
+        plt.figure(figsize=(10,2))
+        plt.step([0,1],[1,1], where='post', color='red')
+        plt.yticks([0,1], ["Down","Up"])
+        plt.title("Historial de caídas de Steam")
+        plt.savefig(GRAPH_FILE)
+        plt.close()
+        return
     times = []
     states = []
     for h in history:
