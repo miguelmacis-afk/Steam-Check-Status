@@ -1,4 +1,9 @@
 {
-  "last_global": null,
-  "last_services": {}
+  "last_global": false,
+  "last_services": {
+    "Steam Store": "Normal",
+    "Steam Community": "Normal",
+    "Steam Web API": "Normal",
+    "Steam Connection Managers": "Normal"
+  }
 }
