@@ -35,18 +35,25 @@ def get_steam_status():
 
     # Estado por servicios
     services = {}
+    # Seleccionamos todas las cards de servicios
     service_divs = soup.select(".status-item")
     for div in service_divs:
         name_tag = div.select_one(".status-item__name")
         status_tag = div.select_one(".status-item__status")
         if name_tag:
             name = name_tag.text.strip()
-            status = "Normal"
+            status = "Normal"  # Valor por defecto
             if status_tag:
                 cls = " ".join(status_tag.get("class", []))
-                if "offline" in cls or "major" in cls or "critical" in cls:
+                # Si la clase contiene algo que indique problemas
+                if any(x in cls for x in ["offline", "major", "critical"]):
                     status = "Problemas"
             services[name] = status
+
+    # En caso de que no detecte servicios, añadimos manualmente los principales
+    for svc in ["Steam Store", "Steam Community", "Steam Web API", "Steam Connection Managers"]:
+        if svc not in services:
+            services[svc] = "Normal"
 
     return not overall_online, services
 
@@ -101,7 +108,9 @@ def send_webhook(overall_down, services):
             "color": 3066993 if not overall_down else 15158332
         }
 
-        requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+        resp = requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+        if resp.status_code != 204:
+            print("Discord webhook error:", resp.status_code, resp.text)
     except Exception as e:
         print("Error enviando webhook:", e)
 
