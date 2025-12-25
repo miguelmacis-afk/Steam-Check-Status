@@ -13,7 +13,11 @@ SERVICES = [
     "Steam Store",
     "Steam Community",
     "Steam Web API",
-    "Steam Connection Managers"
+    "Steam Connection Managers",
+    "Steam Cloud",
+    "Steam Workshop",
+    "Steam Market",
+    "Steam Support"
 ]
 
 # -------------------------
@@ -55,8 +59,10 @@ def get_steam_status():
         # Por ahora simulamos todos online
         for s in SERVICES:
             services[s] = "Normal"
+
         # Ejemplo de porcentaje para Connection Managers
         services["Steam Connection Managers"] = "95.2% Online"
+
     except Exception as e:
         log(f"Error obteniendo estado de Steam: {e}")
         for s in SERVICES:
@@ -111,7 +117,7 @@ def generate_graph(state):
         return
 
     timestamps = [datetime.datetime.strptime(h["timestamp"], "%Y-%m-%d %H:%M:%S") for h in history]
-    values = [100 if h["global"] == False else 0 for h in history]  # 100 online, 0 down
+    values = [0 if h["global"] else 100 for h in history]  # 0 down, 100 online
 
     plt.figure(figsize=(10,2))
     plt.plot(timestamps, values, marker="o")
