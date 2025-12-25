@@ -6,7 +6,7 @@ from datetime import datetime
 import matplotlib.pyplot as plt
 import os
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")  # Debe estar en Secrets
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
 GRAPH_FILE = Path("steam_history.png")
@@ -29,10 +29,9 @@ def get_steam_status():
 
     # Estado global
     overall_div = soup.find("div", class_="status-global")
+    overall_online = True
     if overall_div:
         overall_online = "online" in overall_div.get("class", [])
-    else:
-        overall_online = True  # Default online
 
     # Estado por servicios
     services = {}
@@ -43,27 +42,25 @@ def get_steam_status():
         if name_tag and status_tag:
             name = name_tag.text.strip()
             classes = status_tag.get("class", [])
-            services[name] = "online" if "online" in classes else "offline"
+            services[name] = "Normal" if "online" in classes else "Problemas"
 
-    # Devuelve True si Steam caído (para JSON)
-    return not overall_online, services
+    return not overall_online, services  # True = down, False = online
 
 # ---------------- Actualizar historial ----------------
 def update_history(overall_online):
     history = load_json(HISTORY_FILE, [])
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S")
     if not history or history[-1].get("end") is not None:
-        if not overall_online:  # Nueva caída
+        if not overall_online:
             history.append({"start": now, "end": None})
     else:
-        if overall_online:  # Termina caída
+        if overall_online:
             history[-1]["end"] = now
     return history
 
 # ---------------- Generar gráfica ----------------
 def generate_graph(history):
     if not history:
-        # Gráfico vacío por defecto
         plt.figure(figsize=(10,2))
         plt.step([0,1],[1,1], where='post', color='red')
         plt.yticks([0,1], ["Down","Up"])
@@ -89,13 +86,15 @@ def send_webhook(overall_down, services):
     if not WEBHOOK_URL:
         return
     try:
+        status_text = "Steam DOWN ❌" if overall_down else "Steam ONLINE ✅"
+        # Texto legible sin la hora
+        fields_text = "\n".join([f"{k}: {v}" for k, v in services.items()])
         embed = {
-            "title": f"Steam Status Update - {'DOWN' if overall_down else 'ONLINE'}",
-            "color": 15158332 if overall_down else 3066993,
-            "fields": [{"name": k, "value": v, "inline": True} for k,v in services.items()]
+            "title": status_text,
+            "description": fields_text,
+            "color": 15158332 if overall_down else 3066993
         }
-        data = {"embeds": [embed]}
-        requests.post(WEBHOOK_URL, json=data, timeout=10)
+        requests.post(WEBHOOK_URL, json={"embeds":[embed]}, timeout=10)
     except Exception as e:
         print("Error enviando webhook:", e)
 
