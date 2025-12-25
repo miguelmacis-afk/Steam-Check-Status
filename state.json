@@ -1,6 +1,19 @@
 {
-  "last_global": null,
-  "last_services": {},
-  "history": []
+  "last_global": false,
+  "last_services": {
+    "Steam Connection Managers": "95.2% Online",
+    "Steam Store": "Normal",
+    "Steam Community": "Normal",
+    "Steam Web API": "Normal",
+    "Steam Cloud": "Normal",
+    "Steam Workshop": "Normal",
+    "Steam Market": "Normal",
+    "Steam Support": "Normal"
+  },
+  "history": [
+    {
+      "timestamp": "2025-12-25 23:31:46",
+      "global": false
+    }
+  ]
 }
-
