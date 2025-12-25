@@ -1,16 +1,13 @@
 import requests
 import json
-import re
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 
-# Config
+# ---------------- Config ----------------
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-REPORT_THRESHOLD = 100
-REGION_PERCENT_THRESHOLD = 20
-
+REPORT_THRESHOLD = 1  # 1 significa caído
 STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
 GRAPH_FILE = "steam_reports.png"
@@ -24,47 +21,33 @@ def load_json(path, default):
 def save_json(path, data):
     path.write_text(json.dumps(data, indent=2))
 
-# ---------------- Downdetector ----------------
-def get_downdetector_data():
-    headers = {"User-Agent": "Mozilla/5.0"}
-    url = "https://downdetector.com/status/steam/"
-    r = requests.get(url, headers=headers, timeout=10)
-    # Buscar la parte de JSON con status de forma robusta
-    if '"status"' not in r.text:
-        raise Exception("No se pudo leer datos de Downdetector")
-    # Extraer números de reportes de forma simple usando regex flexible
-    match = re.search(r'"report":\s*(\d+)', r.text)
-    if not match:
-        raise Exception("No se pudo leer reportes de Downdetector")
-    reports = int(match.group(1))
-    # Regiones (opcional)
-    region_matches = re.findall(r'"name":"(.*?)","percent":(\d+)', r.text)
-    regions = [f"{name} ({percent}%)" for name, percent in region_matches if int(percent) >= 20]
+# ---------------- Steamstat.us ----------------
+def get_steam_status():
+    """Consulta la API de Steamstat.us"""
+    r = requests.get("https://steamstat.us/api/v2/status.json", timeout=10)
+    data = r.json()
+    # status puede ser "good" o "major_outage" / "minor_outage"
+    online_status = data["status"]["players"]["status"]
+    # Valor numérico: 0=offline, >0=online
+    reports = 0 if online_status != "good" else 1
+    # Steamstat.us no da regiones
+    regions = []
     return reports, regions
 
-
 # ---------------- History / Graph ----------------
-def update_history(reports, regions, current_status, last_state):
+def update_history(reports, current_status, last_state):
     history = load_json(HISTORY_FILE, [])
-
     now = datetime.utcnow()
 
-    # Detectar inicio de caída
+    # Inicio de caída
     if current_status == "DOWN" and last_state.get("status") != "DOWN":
-        history.append({"start": now.strftime("%Y-%m-%d %H:%M"), "end": None, "max_reports": reports, "regions": regions})
-    # Si sigue caída, actualizar pico y regiones
-    elif current_status == "DOWN" and last_state.get("status") == "DOWN" and history:
-        last = history[-1]
-        last["max_reports"] = max(last["max_reports"], reports)
-        last["regions"] = list(set(last["regions"] + regions))
-    # Si recuperación
+        history.append({"start": now.strftime("%Y-%m-%d %H:%M"), "end": None})
+    # Recuperación
     elif current_status == "UP" and last_state.get("status") == "DOWN" and history:
         last = history[-1]
         last["end"] = now.strftime("%Y-%m-%d %H:%M")
-        last["max_reports"] = max(last["max_reports"], reports)
-        last["regions"] = regions
 
-    # Guardar solo últimos 7 días
+    # Guardar últimos 7 días
     cutoff = now - timedelta(days=7)
     history = [h for h in history if datetime.strptime(h["start"], "%Y-%m-%d %H:%M") > cutoff]
 
@@ -80,27 +63,22 @@ def generate_graph(history):
         start = datetime.strptime(h["start"], "%Y-%m-%d %H:%M")
         end = datetime.strptime(h["end"], "%Y-%m-%d %H:%M") if h["end"] else datetime.utcnow()
         times += [start, end]
-        values += [h["max_reports"], h["max_reports"]]
+        values += [1, 1]  # indicador de caída
 
-    plt.figure(figsize=(10,4))
-    plt.plot(times, values, marker='o')
-    plt.axhline(REPORT_THRESHOLD, color='red', linestyle='--', label='Threshold')
-    plt.xticks(rotation=45)
+    plt.figure(figsize=(10, 2))
+    plt.plot(times, values, marker='o', color='red')
+    plt.yticks([0, 1], ["Online", "Caído"])
+    plt.title("Steam – Historial de caídas (Últimos 7 días)")
     plt.tight_layout()
-    plt.title("Steam – Reportes Downdetector (Últimos 7 días)")
-    plt.ylabel("Reportes")
-    plt.xlabel("Hora")
-    plt.legend()
     plt.savefig(GRAPH_FILE)
     plt.close()
 
 # ---------------- Discord ----------------
-def send_webhook(status, reports, regions):
+def send_webhook(status):
+    import datetime, requests
     color = 0xFF0000 if status=="DOWN" else 0x00FF00
     title = "🔴 Steam CAÍDO" if status=="DOWN" else "🟢 Steam ONLINE"
-    description = f"📉 **Reportes actuales:** {reports}\n"
-    if regions:
-        description += "\n🌍 **Regiones afectadas:**\n" + "\n".join(f"• {r}" for r in regions)
+    description = f"Estado actual: {status}"
     payload = {"embeds":[{"title":title,"description":description,"color":color,"timestamp":datetime.utcnow().isoformat()}]}
     try:
         files = {"file": open(GRAPH_FILE, "rb")} if Path(GRAPH_FILE).exists() else None
@@ -116,18 +94,17 @@ def main():
     if not WEBHOOK_URL:
         raise RuntimeError("WEBHOOK_URL no definido")
 
-    last_state = load_json(STATE_FILE, {"status":"UP","regions":[]})
+    last_state = load_json(STATE_FILE, {"status":"UP"})
+    reports, _ = get_steam_status()
+    current_status = "DOWN" if reports < REPORT_THRESHOLD else "UP"
 
-    reports, regions = get_downdetector_data()
-    current_status = "DOWN" if reports >= REPORT_THRESHOLD else "UP"
-
-    if current_status != last_state.get("status") or regions != last_state.get("regions"):
-        history = update_history(reports, regions, current_status, last_state)
+    # Anti-spam: solo si cambia
+    if current_status != last_state.get("status"):
+        history = update_history(reports, current_status, last_state)
         generate_graph(history)
-        send_webhook(current_status, reports, regions)
+        send_webhook(current_status)
 
     last_state["status"] = current_status
-    last_state["regions"] = regions
     save_json(STATE_FILE, last_state)
 
 if __name__ == "__main__":
