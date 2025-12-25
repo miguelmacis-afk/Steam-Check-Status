@@ -1,108 +1,141 @@
 import requests
+import re
 import json
 import os
 from pathlib import Path
 from datetime import datetime, timedelta
 import matplotlib.pyplot as plt
 
-# ------------ Config ------------
+# ============== Config ==============
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 STATE_FILE = Path("state.json")
 HISTORY_FILE = Path("history.json")
-GRAPH_FILE = "steam_supply_status.png"
-CHECK_KEY = "community"  # puedes cambiar a "api", "ingame", etc.
+GRAPH_FILE = "steamstat_status.png"
 
-# --------- Helpers ----------
-def load_json(file, default):
-    if file.exists():
-        return json.loads(file.read_text())
+# ------------------------------------
+HEADERS = {
+    "User-Agent": 
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+      "AppleWebKit/537.36 (KHTML, like Gecko) "
+      "Chrome/118.0 Safari/537.36",
+    "Accept-Language": "en-US,en;q=0.9"
+}
+
+SERVICES = [
+    "Steam Store",
+    "Steam Community",
+    "Steam Web API",
+    "Steam Connection Managers"
+]
+
+# ---------- Utils ----------
+def load_json(path, default):
+    if path.exists():
+        return json.loads(path.read_text())
     return default
 
-def save_json(file, data):
-    file.write_text(json.dumps(data, indent=2))
+def save_json(path, data):
+    path.write_text(json.dumps(data, indent=2))
 
-# --------- Fetch Steam Supply API ----------
-def get_steam_supply():
-    url = "http://steam.supply/API/LOGIN/getStatus"
-    r = requests.get(url, timeout=10)
+# ---------- Scraping ----------
+def get_steamstat_status():
+    url = "https://steamstat.us/"
+    r = requests.get(url, headers=HEADERS, timeout=15)
     r.raise_for_status()
-    return r.json()
+    html = r.text
 
-# --------- Update history ----------
-def update_history(is_down, last_state):
+    status = {}
+    for svc in SERVICES:
+        pattern = re.escape(svc) + r".*?(Normal|Offline|Major Outage|Partial Outage)"
+        match = re.search(pattern, html, re.IGNORECASE | re.DOTALL)
+        if match:
+            status[svc] = match.group(1).strip()
+        else:
+            status[svc] = "Unknown"
+    return status
+
+# ---------- Decide if Steam overall is down ----------
+def is_overall_down(status):
+    return any(val.lower() != "normal" for val in status.values())
+
+# ---------- History & Graph ----------
+def update_history(down_flag, status):
     history = load_json(HISTORY_FILE, [])
     now = datetime.utcnow().strftime("%Y-%m-%d %H:%M")
-    
-    # If it went down
-    if is_down and last_state["status"] != "DOWN":
+    last = history[-1] if history else None
+
+    if down_flag and not last:
         history.append({"start": now, "end": None})
-    # If it recovered
-    elif not is_down and last_state["status"] == "DOWN" and history:
-        last = history[-1]
+    if down_flag and last and last["end"] is not None:
+        history.append({"start": now, "end": None})
+    if not down_flag and last and last["end"] is None:
         last["end"] = now
 
-    # keep only 7 days
     cutoff = datetime.utcnow() - timedelta(days=7)
-    history = [h for h in history 
-               if datetime.strptime(h["start"], "%Y-%m-%d %H:%M") > cutoff]
-
+    history = [
+        h for h in history
+        if datetime.strptime(h["start"], "%Y-%m-%d %H:%M") > cutoff
+    ]
     save_json(HISTORY_FILE, history)
     return history
 
 def generate_graph(history):
     if not history:
         return
-    dates = []
-    values = []
+    xs, ys = [], []
     for h in history:
         start = datetime.strptime(h["start"], "%Y-%m-%d %H:%M")
         end = datetime.strptime(h["end"], "%Y-%m-%d %H:%M") if h["end"] else datetime.utcnow()
-        dates += [start, end]
-        values += [1, 1]
-    plt.figure(figsize=(10,2))
-    plt.plot(dates, values, marker="o", color="red")
-    plt.yticks([0,1], ["Online","Down"])
-    plt.title("Steam Supply - Estado de Steam (últimos 7 días)")
+        xs += [start, end]
+        ys += [1, 1]
+
+    plt.figure(figsize=(8,2))
+    plt.plot(xs, ys, marker="o", color="red")
+    plt.yticks([0,1], ["OK","Down"])
+    plt.title("Steamstat.us ‐ Caídas en 7 días")
     plt.tight_layout()
     plt.savefig(GRAPH_FILE)
     plt.close()
 
-# --------- Webhook ----------
-def send_webhook(status):
-    import datetime
-    color = 0xFF0000 if status == "DOWN" else 0x00FF00
-    title = "🔴 Steam CAÍDO" if status == "DOWN" else "🟢 Steam ONLINE"
-    description = f"Estado de servicio: {status}"
-    payload = {"embeds": [{
-        "title": title,
-        "description": description,
-        "color": color,
-        "timestamp": datetime.datetime.utcnow().isoformat()
-    }]}
+# ---------- Discord ----------
+def send_webhook(status, overall):
+    color = 0xFF0000 if overall else 0x00FF00
+    title = "🔴 Steam CAÍDO" if overall else "🟢 Steam ONLINE"
+
+    desc = ""
+    for svc, st in status.items():
+        desc += f"**{svc}**: {st}\n"
+
+    payload = {
+        "embeds": [{
+            "title": title,
+            "description": desc,
+            "color": color,
+            "timestamp": datetime.utcnow().isoformat()
+        }]
+    }
+
     files = None
     if Path(GRAPH_FILE).exists():
-        files = {"file": open(GRAPH_FILE,"rb")}
+        files = {"file": open(GRAPH_FILE, "rb")}
+
     requests.post(WEBHOOK_URL, data={"payload_json": json.dumps(payload)}, files=files)
 
-# --------- Main ----------
+# ---------- Main ----------
 def main():
     if not WEBHOOK_URL:
         raise RuntimeError("WEBHOOK_URL no está definido")
 
-    last_state = load_json(STATE_FILE, {"status": "UP"})
+    last_state = load_json(STATE_FILE, {"down": False})
+    status = get_steamstat_status()
+    overall = is_overall_down(status)
 
-    data = get_steam_supply()
-    # is_down if the chosen segment is not alive
-    is_down = not data.get(CHECK_KEY, {}).get("alive", True)
-    current_status = "DOWN" if is_down else "UP"
-
-    if current_status != last_state["status"]:
-        history = update_history(is_down, last_state)
+    if overall != last_state.get("down"):
+        history = update_history(overall, status)
         generate_graph(history)
-        send_webhook(current_status)
+        send_webhook(status, overall)
 
-    last_state["status"] = current_status
-    save_json(STATE_FILE, last_state)
+    save_json(STATE_FILE, {"down": overall})
 
 if __name__ == "__main__":
     main()
