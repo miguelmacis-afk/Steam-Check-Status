@@ -2,7 +2,6 @@ import requests
 import os
 import json
 import datetime
-import re
 from bs4 import BeautifulSoup
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
@@ -11,12 +10,23 @@ STATE_FILE = "state.json"
 BAD_KEYWORDS = ["outage", "offline", "issues", "problem", "down"]
 
 HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/120.0 Safari/537.36"
+    )
 }
+
+# -------------------------
+# STATE
+# -------------------------
 
 def load_state():
     if not os.path.exists(STATE_FILE):
-        return {"last_status": None}
+        return {
+            "last_global": None,
+            "last_services": {}
+        }
     with open(STATE_FILE, "r") as f:
         return json.load(f)
 
@@ -24,33 +34,31 @@ def save_state(state):
     with open(STATE_FILE, "w") as f:
         json.dump(state, f, indent=2)
 
-def is_bad(status):
+# -------------------------
+# HELPERS
+# -------------------------
+
+def is_bad(status: str) -> bool:
     return any(bad in status.lower() for bad in BAD_KEYWORDS)
 
+# -------------------------
+# SCRAPE STEAMSTAT
+# -------------------------
+
 def scrape_steamstat():
-    r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=15)
-    r.raise_for_status()
+    """
+    Devuelve dict de servicios.
+    Si Steamstat no responde correctamente, devuelve None (NO rompe).
+    """
+    try:
+        r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=15)
+        r.raise_for_status()
+    except Exception as e:
+        print("⚠️ Error accediendo a Steamstat:", e)
+        return None
 
     services = {}
 
-    # 1️⃣ INTENTO: JSON interno (si existe)
-    match = re.search(r'__INITIAL_STATE__\s*=\s*({.*?});', r.text, re.S)
-    if match:
-        try:
-            data = json.loads(match.group(1))
-            for s in data.get("services", []):
-                services[s["name"]] = s["status"]
-
-            cm = data.get("connectionManagers", {})
-            if "onlinePercent" in cm:
-                services["Steam Connection Managers"] = f'{cm["onlinePercent"]}% Online'
-
-            if services:
-                return services
-        except Exception:
-            pass  # fallback abajo
-
-    # 2️⃣ FALLBACK: HTML scraping (funciona en Actions)
     soup = BeautifulSoup(r.text, "html.parser")
 
     for row in soup.find_all("tr"):
@@ -61,16 +69,23 @@ def scrape_steamstat():
         name = cols[0].get_text(strip=True)
         status = cols[1].get_text(strip=True)
 
-        if name.lower().startswith("steam"):
+        # solo servicios de Steam
+        if name.lower().startswith("steam") and status:
             services[name] = status
 
-    if services:
-        return services
+    if not services:
+        print("⚠️ Steamstat no devolvió servicios (HTML vacío)")
+        return None
 
-    # 3️⃣ SI TODO FALLA → NO ROMPER
-    raise Exception("Steamstat cambió el HTML, no se pudieron obtener servicios")
-def send_webhook(services, steam_down):
+    return services
+
+# -------------------------
+# DISCORD WEBHOOK
+# -------------------------
+
+def send_webhook(services: dict, steam_down: bool):
     if not WEBHOOK_URL:
+        print("WEBHOOK_URL no configurado")
         return
 
     color = 15158332 if steam_down else 3066993
@@ -100,22 +115,47 @@ def send_webhook(services, steam_down):
         }
     }
 
-    requests.post(WEBHOOK_URL, json={"embeds": [embed]}, timeout=10)
+    try:
+        requests.post(
+            WEBHOOK_URL,
+            json={"embeds": [embed]},
+            timeout=10
+        )
+    except Exception as e:
+        print("Error enviando webhook:", e)
+
+# -------------------------
+# MAIN
+# -------------------------
 
 def main():
-    services = scrape_steamstat()
-    steam_down = any(is_bad(s) for s in services.values())
-
     state = load_state()
 
-    if state["last_status"] == steam_down:
-        print("Sin cambios, no se envía aviso.")
+    services = scrape_steamstat()
+
+    # si Steamstat falló, usamos último estado válido
+    if services is None:
+        print("Usando último estado guardado")
+        services = state.get("last_services", {})
+
+    if not services:
+        print("No hay servicios disponibles, se aborta envío")
         return
 
-    send_webhook(services, steam_down)
+    steam_down = any(is_bad(status) for status in services.values())
 
-    state["last_status"] = steam_down
+    # evitar spam: solo enviar si cambia el estado global
+    if state.get("last_global") == steam_down:
+        print("Sin cambios globales, no se envía Discord")
+    else:
+        send_webhook(services, steam_down)
+
+    # guardar estado
+    state["last_global"] = steam_down
+    state["last_services"] = services
     save_state(state)
+
+# -------------------------
 
 if __name__ == "__main__":
     main()
