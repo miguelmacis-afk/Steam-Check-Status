@@ -2,14 +2,19 @@ name: Steam Status Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"  # Cada 5 minutos (UTC)
-  workflow_dispatch:        # También se puede ejecutar manualmente
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
 
 jobs:
   check-steam:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
+      - name: Initialize JSON files
+        run: |
+          echo '{}' > state.json
+          echo '[]' > history.json
 
       - name: Set up Python
         uses: actions/setup-python@v4
@@ -24,11 +29,10 @@ jobs:
         env:
           WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK }}
 
-      # ------------------ Commit automático ------------------
       - name: Commit JSON history
         run: |
           git config user.name "github-actions"
           git config user.email "actions@github.com"
-          git add history.json state.json
+          git add state.json history.json
           git commit -m "Update Steam history [skip ci]" || echo "No changes to commit"
           git push
