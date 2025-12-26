@@ -6,6 +6,7 @@ from datetime import datetime
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 STATE_FILE = "state.json"
+HTML_DEBUG_FILE = "steamstat_debug.html"
 
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -34,12 +35,18 @@ def save_state(state):
         json.dump(state, f, indent=2)
 
 def scrape_steamstat():
-    r = requests.get("https://steamstat.us/", headers=HEADERS, timeout=20)
+    url = "https://steamstat.us/"
+    r = requests.get(url, headers=HEADERS, timeout=20)
     r.raise_for_status()
+    html_content = r.text
 
-    soup = BeautifulSoup(r.text, "html.parser")
+    # Guardamos HTML para debug
+    with open(HTML_DEBUG_FILE, "w", encoding="utf-8") as f:
+        f.write(html_content)
+    print(f"✅ HTML guardado en {HTML_DEBUG_FILE}")
+
+    soup = BeautifulSoup(html_content, "html.parser")
     services = {}
-
     rows = soup.select("table.services tr")
     if not rows:
         raise Exception("Steamstat no devolvió servicios")
@@ -48,10 +55,8 @@ def scrape_steamstat():
         cols = row.find_all("td")
         if len(cols) < 2:
             continue
-
         name = cols[0].get_text(strip=True)
         status = cols[1].get_text(strip=True)
-
         services[name] = status
 
     return services
@@ -71,7 +76,6 @@ def status_emoji(status):
 
 def send_discord(services, verified):
     fields = []
-
     for name in SERVICE_ORDER:
         if name not in services:
             continue
@@ -94,7 +98,8 @@ def send_discord(services, verified):
         }]
     }
 
-    requests.post(WEBHOOK_URL, json=payload, timeout=20)
+    if WEBHOOK_URL:
+        requests.post(WEBHOOK_URL, json=payload, timeout=20)
 
 def main():
     prev_state = load_state()
@@ -105,10 +110,10 @@ def main():
     except Exception as e:
         print(f"⚠️ Steamstat sin datos ({e})")
         verified = False
-
         if "services" in prev_state:
             services = prev_state["services"]
         else:
+            # Primer arranque: estado desconocido
             services = {
                 "Steam Connection Managers": "Estado no verificado",
                 "Steam Store": "Estado no verificado",
