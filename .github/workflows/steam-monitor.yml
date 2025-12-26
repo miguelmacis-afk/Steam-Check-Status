@@ -6,25 +6,37 @@ on:
   workflow_dispatch:
 
 jobs:
-  monitor:
+  steam-status:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v3
 
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '20'
+          node-version: 20
 
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright Browsers
-        run: npx playwright install
+      # Descargar artifact estado.json anterior si existe
+      - name: Download previous estado.json
+        uses: actions/download-artifact@v3
+        with:
+          name: estado-json
+          path: ./estado
 
-      - name: Run Monitor
+      - name: Run Steam Monitor
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: npm start
+        run: |
+          mkdir -p ./estado
+          node monitor.js
+
+      # Subir el estado actualizado como artifact
+      - name: Upload updated estado.json
+        uses: actions/upload-artifact@v3
+        with:
+          name: estado-json
+          path: ./estado/estado.json
