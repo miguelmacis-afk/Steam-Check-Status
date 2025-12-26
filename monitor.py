@@ -35,26 +35,21 @@ def scrape_steamstat():
     soup = BeautifulSoup(r.text, "html.parser")
     services = {}
 
-    # Servicios principales
-    for row in soup.select("table.table tbody tr"):
-        cols = row.find_all("td")
-        if len(cols) < 2:
-            continue
-
-        name = cols[0].get_text(strip=True)
-        status = cols[1].get_text(" ", strip=True)
-
-        if name and status:
-            services[name] = status
+    table = soup.select_one("table.table tbody")
+    if table:
+        for row in table.find_all("tr"):
+            cols = row.find_all("td")
+            if len(cols) < 2:
+                continue
+            name = cols[0].get_text(strip=True)
+            status = cols[1].get_text(" ", strip=True)
+            if name and status:
+                services[name] = status
 
     # Connection Managers (% real)
     cm = soup.find("div", id="cms")
     if cm:
-        percent = cm.get_text(strip=True)
-        services["Steam Connection Managers"] = percent
-
-    if not services:
-        raise Exception("Steamstat no devolvió servicios")
+        services["Steam Connection Managers"] = cm.get_text(strip=True)
 
     return services
 
@@ -62,7 +57,7 @@ def is_bad(status):
     s = status.lower()
     return any(x in s for x in ["major", "down", "outage", "offline"])
 
-def build_message(services):
+def build_message(services, verified=True):
     lines = []
 
     global_down = any(is_bad(v) for v in services.values())
@@ -70,15 +65,20 @@ def build_message(services):
     lines.append(header)
     lines.append("")
 
-    # Orden: CM primero
+    # Orden: Connection Managers primero
     ordered = []
     if "Steam Connection Managers" in services:
-        ordered.append(("Steam Connection Managers", services.pop("Steam Connection Managers")))
+        ordered.append(("Steam Connection Managers", services["Steam Connection Managers"]))
 
-    ordered += services.items()
+    for k, v in services.items():
+        if k != "Steam Connection Managers":
+            ordered.append((k, v))
 
     for name, status in ordered:
-        if is_bad(status):
+        if not verified:
+            emoji = "⚪"
+            status = "Estado no verificado"
+        elif is_bad(status):
             emoji = "🔴"
         elif "%" in status:
             emoji = "🟡"
@@ -93,24 +93,28 @@ def build_message(services):
     return "\n".join(lines), global_down
 
 def send_discord(content):
-    requests.post(
-        WEBHOOK_URL,
-        json={"content": content},
-        timeout=15
-    )
+    requests.post(WEBHOOK_URL, json={"content": content}, timeout=15)
 
 def main():
+    prev_state = load_state()
+    verified = True
+
     try:
         services = scrape_steamstat()
+        if not services:
+            raise Exception("HTML vacío")
     except Exception as e:
-        print(f"⚠️ Error Steamstat: {e}")
-        return
+        print(f"⚠️ Steamstat sin datos ({e})")
+        if "services" in prev_state:
+            services = prev_state["services"]
+            verified = False
+        else:
+            print("❌ No hay estado previo, se aborta")
+            return
 
-    state = load_state()
-    message, global_down = build_message(services)
+    message, global_down = build_message(services, verified)
 
-    # Detectar cambios reales
-    if state.get("services") == services:
+    if prev_state.get("services") == services and prev_state.get("verified") == verified:
         print("ℹ️ Sin cambios, no se envía a Discord")
         return
 
@@ -119,10 +123,11 @@ def main():
     save_state({
         "services": services,
         "global_down": global_down,
+        "verified": verified,
         "last_update": datetime.utcnow().isoformat()
     })
 
-    print("✅ Estado actualizado y enviado")
+    print("✅ Estado enviado y guardado")
 
 if __name__ == "__main__":
     main()
