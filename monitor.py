@@ -1,141 +1,49 @@
-import os
-import json
-import requests
-from bs4 import BeautifulSoup
-from datetime import datetime
+# monitor.py
+import asyncio
+from pathlib import Path
+from playwright.async_api import async_playwright
 
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-STATE_FILE = "state.json"
-HTML_DEBUG_FILE = "steamstat_debug.html"
+OUTPUT_HTML = Path("steamstat.html")
 
-HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
-                  "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-}
+async def main():
+    async with async_playwright() as p:
+        browser = await p.chromium.launch(headless=True)
+        page = await browser.new_page()
+        await page.goto("https://steamstat.us/")
 
-SERVICE_ORDER = [
-    "Steam Connection Managers",
-    "Steam Store",
-    "Steam Community",
-    "Steam Web API",
-    "Steam Workshop",
-    "Steam Market",
-    "Steam Support",
-]
+        # Esperar a que los elementos de servicios estén cargados
+        await page.wait_for_selector(".service .status", timeout=15000)
 
-def load_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    return {}
+        # Guardar HTML completo
+        html_content = await page.content()
+        OUTPUT_HTML.write_text(html_content, encoding="utf-8")
+        print(f"HTML guardado en {OUTPUT_HTML}")
 
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
+        # Extraer servicios y estados
+        services = {}
+        service_elements = await page.query_selector_all(".service")
+        for service in service_elements:
+            name_elem = await service.query_selector(".name")
+            status_elem = await service.query_selector(".status")
+            if name_elem and status_elem:
+                name = (await name_elem.inner_text()).strip()
+                status = (await status_elem.inner_text()).strip()
+                services[name] = status
 
-def scrape_steamstat():
-    url = "https://steamstat.us/"
-    r = requests.get(url, headers=HEADERS, timeout=20)
-    r.raise_for_status()
-    html_content = r.text
+        # Orden recomendado: Steam Connection Managers primero
+        sorted_services = sorted(services.items(), key=lambda x: 0 if "Steam Connection Managers" in x[0] else 1)
 
-    # Guardamos HTML para debug
-    with open(HTML_DEBUG_FILE, "w", encoding="utf-8") as f:
-        f.write(html_content)
-    print(f"✅ HTML guardado en {HTML_DEBUG_FILE}")
+        # Mostrar con emojis
+        for name, status in sorted_services:
+            if any(x in status.lower() for x in ["offline", "down", "0"]):
+                emoji = "🔴"
+            elif "%" in status:
+                emoji = "🟡"
+            else:
+                emoji = "🟢"
+            print(f"{emoji} {name}: {status}")
 
-    soup = BeautifulSoup(html_content, "html.parser")
-    services = {}
-    rows = soup.select("table.services tr")
-    if not rows:
-        raise Exception("Steamstat no devolvió servicios")
-
-    for row in rows:
-        cols = row.find_all("td")
-        if len(cols) < 2:
-            continue
-        name = cols[0].get_text(strip=True)
-        status = cols[1].get_text(strip=True)
-        services[name] = status
-
-    return services
-
-def is_bad(status):
-    s = status.lower()
-    return any(x in s for x in ["down", "outage", "offline", "critical"])
-
-def status_emoji(status):
-    if "%" in status:
-        return "🟡"
-    if is_bad(status):
-        return "🔴"
-    if "no verificado" in status.lower():
-        return "⚪"
-    return "🟢"
-
-def send_discord(services, verified):
-    fields = []
-    for name in SERVICE_ORDER:
-        if name not in services:
-            continue
-        status = services[name]
-        emoji = status_emoji(status)
-        fields.append({
-            "name": f"{emoji} {name}",
-            "value": status,
-            "inline": False
-        })
-
-    payload = {
-        "embeds": [{
-            "title": "Steam ONLINE",
-            "color": 0x57F287 if verified else 0xFAA61A,
-            "fields": fields,
-            "footer": {
-                "text": f"Actualizado: {datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}"
-            }
-        }]
-    }
-
-    if WEBHOOK_URL:
-        requests.post(WEBHOOK_URL, json=payload, timeout=20)
-
-def main():
-    prev_state = load_state()
-    verified = True
-
-    try:
-        services = scrape_steamstat()
-    except Exception as e:
-        print(f"⚠️ Steamstat sin datos ({e})")
-        verified = False
-        if "services" in prev_state:
-            services = prev_state["services"]
-        else:
-            # Primer arranque: estado desconocido
-            services = {
-                "Steam Connection Managers": "Estado no verificado",
-                "Steam Store": "Estado no verificado",
-                "Steam Community": "Estado no verificado",
-                "Steam Web API": "Estado no verificado",
-                "Steam Workshop": "Estado no verificado",
-                "Steam Market": "Estado no verificado",
-                "Steam Support": "Estado no verificado",
-            }
-
-    changed = services != prev_state.get("services")
-
-    if changed:
-        send_discord(services, verified)
-        save_state({
-            "services": services,
-            "verified": verified,
-            "updated": datetime.utcnow().isoformat()
-        })
-        print("✅ Cambio detectado, enviado a Discord")
-    else:
-        print("ℹ️ Sin cambios, no se envía nada")
+        await browser.close()
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())
