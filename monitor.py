@@ -31,7 +31,17 @@ async def get_steam_status():
         await page.wait_for_selector("div.status-grid", timeout=60000)
         
         # Extrae todos los bloques de servicio
-        services = await page.query_selector_all("div.status-grid > div.status-item")
+        services = await page.evaluate("""
+() => {
+    const items = document.querySelectorAll('div.status-grid > div.status-item');
+    return Array.from(items).map(s => {
+        const name = s.querySelector('div.status-title')?.innerText || '';
+        const statusClass = s.querySelector('div.status-dot')?.className || '';
+        return { name, statusClass };
+    });
+}
+""")
+
         result = []
         for s in services:
             name_el = await s.query_selector("div.status-title")
