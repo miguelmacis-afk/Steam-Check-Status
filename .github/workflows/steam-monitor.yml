@@ -2,38 +2,36 @@ name: Steam Status Monitor
 
 on:
   schedule:
-    - cron: "*/5 * * * *"
-  workflow_dispatch:
-
-permissions:
-  contents: write
+    - cron: '*/10 * * * *' # cada 10 minutos
+  workflow_dispatch: # permite ejecutar manualmente
 
 jobs:
-  check-steam:
+  monitor:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Set up Python
+        uses: actions/setup-python@v4
         with:
-          python-version: "3.11"
+          python-version: '3.11'
 
       - name: Install dependencies
         run: |
-          pip install requests beautifulsoup4
+          pip install --upgrade pip
+          pip install playwright
+          playwright install
+          pip install -r requirements.txt || echo "No requirements.txt"
 
-      - name: Run monitor
-        env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: python monitor.py
-
-      - name: Commit state
+      - name: Run Monitor
         run: |
-          git config user.name "github-actions"
-          git config user.email "actions@github.com"
-          git add state.json steamstat_debug.html
-          git commit -m "Update Steam state [skip ci]" || echo "No changes"
-          git push
+          mkdir -p logs
+          python monitor.py 2>&1 | tee logs/steam_status.log
+
+      - name: Upload logs as artifact
+        uses: actions/upload-artifact@v3
+        with:
+          name: steam_status_logs
+          path: logs/steam_status.log
