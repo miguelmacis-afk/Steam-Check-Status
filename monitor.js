@@ -5,7 +5,7 @@ import path from "path";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 // Ruta absoluta del JSON en el mismo directorio del JS
-const estadoPath = "estado.json";
+const estadoPath = path.join(path.dirname(process.argv[1]), "estado.json");
 
 // Servicios que NO queremos mostrar
 const IGNORE_SERVICES = [
@@ -34,8 +34,6 @@ const ALERT_SERVICES = [
 // Decide emoji según estado real
 function statusEmoji(status) {
   const s = status.toLowerCase();
-
-  // Porcentaje (ej: 95.2% Online)
   const match = s.match(/(\d+(\.\d+)?)%/);
   if (match) {
     const pct = parseFloat(match[1]);
@@ -50,7 +48,7 @@ function statusEmoji(status) {
   return "⚪"; // desconocido
 }
 
-// Traduce estado a español
+// Traduce nombre de servicio al español
 function traducir(nombre) {
   const map = {
     "Online on Steam": "Online en Steam",
@@ -61,6 +59,13 @@ function traducir(nombre) {
     "Database": "Base de Datos"
   };
   return map[nombre] || nombre;
+}
+
+// Simplifica el estado para guardarlo en JSON
+function estadoSimple(status) {
+  const s = status.toLowerCase();
+  if (s.includes("normal") || s.includes("online") || s.includes("%")) return "Normal";
+  return "Caído";
 }
 
 async function getSteamStatus() {
@@ -123,7 +128,6 @@ async function main() {
 
   // Construir mensaje
   const lines = [];
-  // Emoji de estado general según Steam
   const onlinePct = parseInt(online.replace(/,/g, "")) || 0;
   const generalEmoji = onlinePct > 0 ? "🟢" : "🔴";
   lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
@@ -143,13 +147,17 @@ async function main() {
     lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
   }
 
-  // Solo avisar si cambió algún servicio importante
+  // Construir nuevo estado simplificado
   let changed = false;
   const newEstado = {};
   for (const svc of ALERT_SERVICES) {
-    const value = services[svc] || "Desconocido";
+    const valueRaw = services[svc] || "Desconocido";
+    const value = estadoSimple(valueRaw);
+
+    const prev = prevEstado[svc];
+    if (prev !== value) changed = true;
+
     newEstado[svc] = value;
-    if (prevEstado[svc] !== value) changed = true;
   }
 
   // Guardar estado actualizado
@@ -160,7 +168,7 @@ async function main() {
     console.error("❌ No se pudo guardar estado.json:", err);
   }
 
-  // Solo enviar Discord si hay cambios en servicios importantes
+  // Enviar solo si cambió algún servicio importante
   if (changed) {
     await sendToDiscord(lines.join("\n"), chartBuffer);
     console.log("✅ Estado enviado a Discord");
