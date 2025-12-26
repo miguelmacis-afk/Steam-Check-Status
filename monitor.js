@@ -4,7 +4,7 @@ import axios from "axios";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 async function getSteamStatus() {
-    const browser = await chromium.launch({ headless: false });
+    const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
 await page.goto("https://steamstat.us/", { waitUntil: "networkidle" });
 await page.waitForSelector("div.status-grid", { timeout: 120000 }); // 2 minutos
