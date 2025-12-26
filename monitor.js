@@ -6,6 +6,8 @@ const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const IGNORE_SERVICES = [
   "SteamStat.us Page Views",
   "Backend Steam Bot",
+  "In-Game on Steam",
+  "Dota 2 API",
   "TF2 API",
   "Deadlock API",
   "Counter-Strike API",
