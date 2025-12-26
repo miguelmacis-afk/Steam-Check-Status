@@ -1,5 +1,4 @@
 import { chromium } from 'playwright';
-import FormData from 'form-data';
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
