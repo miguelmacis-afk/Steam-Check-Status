@@ -1,13 +1,5 @@
 {
-  "services": {
-    "Steam Connection Managers": "Estado no verificado",
-    "Steam Store": "Estado no verificado",
-    "Steam Community": "Estado no verificado",
-    "Steam Web API": "Estado no verificado",
-    "Steam Workshop": "Estado no verificado",
-    "Steam Market": "Estado no verificado",
-    "Steam Support": "Estado no verificado"
-  },
+  "services": {},
   "verified": false,
-  "updated": "2025-12-26T00:16:29.658809"
+  "updated": ""
 }
