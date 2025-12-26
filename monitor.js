@@ -19,7 +19,6 @@ const IGNORE_SERVICES = [
 ];
 
 const ALERT_SERVICES = [
-  "Steam Connection Managers",
   "Steam Store",
   "Steam Community",
   "Steam Web API",
