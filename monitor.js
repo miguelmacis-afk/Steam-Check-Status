@@ -1,75 +1,92 @@
-import { chromium } from 'playwright';
+import { chromium } from "playwright";
+import { Blob } from "buffer";
 
+const STEAM_URL = "https://steamstat.us/";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-async function getSteamStatus() {
-    const browser = await chromium.launch({ headless: true });
-    const page = await browser.newPage();
-
-    try {
-        await page.goto('https://steamstat.us/', { waitUntil: 'networkidle' });
-
-        // Espera que cargue la sección de servicios
-        await page.waitForSelector('div.services', { timeout: 60000 });
-
-        // Obtener todos los servicios
-        const services = await page.$$eval('div.service, div.sep.service', nodes => {
-            return nodes.map(node => {
-                const name = node.querySelector('.name')?.innerText.trim() || 'Desconocido';
-                const status = node.querySelector('.status')?.innerText.trim() || 'Desconocido';
-                return { name, status };
-            });
-        });
-
-        // Capturar gráfico CMS
-        const chart = await page.$('#js-cms-chart');
-        let chartBuffer = null;
-        if (chart) {
-            chartBuffer = await chart.screenshot();
-        }
-
-        await browser.close();
-        return { services, chartBuffer };
-
-    } catch (err) {
-        await browser.close();
-        throw new Error('Error al obtener los datos: ' + err.message);
-    }
+if (!WEBHOOK_URL) {
+  console.error("WEBHOOK_URL no definido");
+  process.exit(1);
 }
 
-async function sendToDiscord({ services, chartBuffer }) {
-    try {
-        let content = '📡 **Steam Status**\n';
-        for (const s of services) {
-            content += `**${s.name}:** ${s.status}\n`;
-        }
+async function getSteamStatus() {
+  const browser = await chromium.launch({
+    headless: true,
+    args: ["--no-sandbox", "--disable-setuid-sandbox"]
+  });
 
-        if (chartBuffer) {
-            const formData = new FormData();
-            formData.append('file', chartBuffer, 'cms-chart.png');
-            formData.append('content', content);
+  const page = await browser.newPage({
+    viewport: { width: 1280, height: 900 }
+  });
 
-            await fetch(WEBHOOK_URL, { method: 'POST', body: formData });
-        } else {
-            await fetch(WEBHOOK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ content })
-            });
-        }
+  await page.goto(STEAM_URL, { waitUntil: "networkidle" });
 
-    } catch (err) {
-        console.error('Error al enviar los datos:', err);
-    }
+  // Esperar a que carguen los servicios (JS)
+  await page.waitForSelector(".services .service", { timeout: 60000 });
+
+  const services = await page.$$eval(".services .service", nodes =>
+    nodes.map(n => {
+      const name = n.querySelector(".name")?.innerText.trim() ?? "Desconocido";
+      const status = n.querySelector(".status")?.innerText.trim() ?? "Desconocido";
+      return { name, status };
+    })
+  );
+
+  // Screenshot SOLO del gráfico CMS
+  let chartBuffer = null;
+  const chart = await page.$("#js-cms-chart");
+  if (chart) {
+    chartBuffer = await chart.screenshot();
+  }
+
+  await browser.close();
+
+  return { services, chartBuffer };
+}
+
+function buildMessage(services) {
+  let msg = "🟢 **Steam Services Status**\n\n";
+
+  for (const s of services) {
+    let icon = "🟢";
+    if (/offline|down|error/i.test(s.status)) icon = "🔴";
+    if (/degraded|slow/i.test(s.status)) icon = "🟡";
+
+    msg += `${icon} **${s.name}**: ${s.status}\n`;
+  }
+
+  return msg;
+}
+
+async function sendToDiscord(message, imageBuffer) {
+  const form = new FormData();
+  form.append("content", message);
+
+  if (imageBuffer) {
+    const blob = new Blob([imageBuffer], { type: "image/png" });
+    form.append("file", blob, "steam_cms_chart.png");
+  }
+
+  const res = await fetch(WEBHOOK_URL, {
+    method: "POST",
+    body: form
+  });
+
+  if (!res.ok) {
+    throw new Error(`Discord webhook error: ${res.status}`);
+  }
 }
 
 async function main() {
-    try {
-        const data = await getSteamStatus();
-        await sendToDiscord(data);
-    } catch (err) {
-        console.error(err.message);
-    }
+  try {
+    const { services, chartBuffer } = await getSteamStatus();
+    const message = buildMessage(services);
+    await sendToDiscord(message, chartBuffer);
+    console.log("Estado enviado correctamente a Discord");
+  } catch (err) {
+    console.error("Error:", err.message);
+    process.exit(1);
+  }
 }
 
 main();
