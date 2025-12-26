@@ -1,55 +1,61 @@
-// monitor.js
-import { chromium } from 'playwright';
+import { chromium } from "playwright";
 
-
-const WEBHOOK_URL = process.env.WEBHOOK_URL; // Pon tu secret de GitHub
+// Tomamos el webhook desde el secret
+const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 async function getSteamStatus() {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
-    await page.goto('https://steamstat.us/', { waitUntil: 'networkidle' });
 
-    // Esperamos que cargue la sección principal
-    await page.waitForSelector('div.status-row', { timeout: 60000 });
+    try {
+        await page.goto("https://steamstat.us/");
 
-    // Extraemos los servicios y estados
-    const statuses = await page.$$eval('div.status-row', rows => {
-        return rows.map(row => {
-            const name = row.querySelector('span.status-name')?.textContent.trim() || 'Unknown';
-            const stateEl = row.querySelector('span.status-indicator');
-            let state = 'Unknown';
-            if (stateEl) {
-                if (stateEl.classList.contains('green')) state = '🟢 Normal';
-                else if (stateEl.classList.contains('yellow')) state = '🟡 Problemas';
-                else if (stateEl.classList.contains('red')) state = '🔴 Caído';
-            }
-            return { name, state };
+        // Espera hasta que cargue la tabla de status
+        await page.waitForSelector("div.status-grid", { timeout: 60000 });
+
+        // Extraemos los datos
+        const status = await page.evaluate(() => {
+            const blocks = document.querySelectorAll("div.status-grid div.status");
+            const results = [];
+            blocks.forEach(b => {
+                const name = b.querySelector("div.service-name")?.innerText.trim();
+                const stat = b.querySelector("div.service-status")?.innerText.trim();
+                if (name && stat) results.push({ name, stat });
+            });
+            return results;
         });
-    });
 
-    await browser.close();
-    return statuses;
+        return status;
+    } catch (err) {
+        console.error("Error al obtener los datos:", err.message);
+        return null;
+    } finally {
+        await browser.close();
+    }
 }
 
-async function sendToDiscord(statuses) {
-    const message = statuses.map(s => `${s.state} ${s.name}`).join('\n');
-    const payload = { content: `**Steam Status**\n${message}` };
+async function sendDiscord(status) {
+    if (!status || status.length === 0) return;
 
-    await fetch(WEBHOOK_URL, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
-    });
+    const content = status.map(s => {
+        const emoji = s.stat.includes("Online") ? "🟢" : "🔴";
+        return `${emoji} **${s.name}**: ${s.stat}`;
+    }).join("\n");
+
+    try {
+        await fetch(WEBHOOK_URL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ content })
+        });
+    } catch (err) {
+        console.error("Error al enviar al Discord:", err.message);
+    }
 }
 
 async function main() {
-    try {
-        const statuses = await getSteamStatus();
-        await sendToDiscord(statuses);
-        console.log('Estado enviado a Discord correctamente.');
-    } catch (err) {
-        console.error('Error al obtener o enviar los datos:', err);
-    }
+    const status = await getSteamStatus();
+    await sendDiscord(status);
 }
 
 main();
