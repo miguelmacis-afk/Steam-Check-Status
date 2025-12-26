@@ -1,58 +1,61 @@
-import { chromium } from "playwright";
+import { chromium } from 'playwright';
+import fetch from 'node-fetch';
 
+// Tu webhook de Discord desde secrets/env
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-async function getSteamStatus() {
+// Lista de servicios que queremos monitorear
+const SERVICES = [
+    "Steam", "Steam Store", "Steam Community", "Steam Web API", 
+    "Steam Cloud", "Steam Workshop", "Steam Market", "Steam Support",
+    "Region NA", "Region EU", "Region ASIA"
+];
+
+// Map de emojis según estado
+const STATUS_EMOJI = {
+    "Normal": "🟢",
+    "Online": "🟢",
+    "Offline": "🔴",
+    "Desconocido": "⚪"
+};
+
+// Función principal
+async function main() {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
 
     try {
-        await page.goto("https://steamstat.us/", { waitUntil: "networkidle" });
+        await page.goto('https://steamstat.us/', { waitUntil: 'networkidle' });
 
-        // Pequeña espera para que el JS renderice los bloques
-        await page.waitForTimeout(5000);
+        // Extraemos todo el texto visible de la sección principal
+        const text = await page.textContent('body');
 
-        // Scrapeamos todos los divs que contengan 'service' en su clase
-        const status = await page.evaluate(() => {
-            const blocks = Array.from(document.querySelectorAll("div.service"));
-            return blocks.map(b => {
-                const name = b.querySelector("div.service-name")?.innerText.trim() || "Desconocido";
-                const stat = b.querySelector("div.service-status")?.innerText.trim() || "Desconocido";
-                return { name, stat };
-            });
+        const lines = [];
+
+        for (const service of SERVICES) {
+            // Buscamos el estado cercano al nombre del servicio
+            const regex = new RegExp(`${service}:?\\s*(Normal|Online|Offline)?`, 'i');
+            const match = text.match(regex);
+            const status = match && match[1] ? match[1] : "Desconocido";
+            lines.push(`${STATUS_EMOJI[status] || "⚪"} ${service}: ${status}`);
+        }
+
+        const message = lines.join("\n");
+
+        console.log(message);
+
+        // Enviamos al Discord
+        await fetch(WEBHOOK_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content: `**Steam Status**\n${message}` })
         });
 
-        return status;
     } catch (err) {
-        console.error("Error al obtener los datos:", err.message);
-        return null;
+        console.error("Error al obtener o enviar los datos:", err);
     } finally {
         await browser.close();
     }
-}
-
-async function sendDiscord(status) {
-    if (!status || status.length === 0) return;
-
-    const content = status.map(s => {
-        const emoji = s.stat.includes("Online") ? "🟢" : "🔴";
-        return `${emoji} **${s.name}**: ${s.stat}`;
-    }).join("\n");
-
-    try {
-        await fetch(WEBHOOK_URL, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ content })
-        });
-    } catch (err) {
-        console.error("Error al enviar al Discord:", err.message);
-    }
-}
-
-async function main() {
-    const status = await getSteamStatus();
-    await sendDiscord(status);
 }
 
 main();
