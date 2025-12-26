@@ -3,10 +3,24 @@ import fs from "fs";
 import path from "path";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const STATE_FILE = path.resolve(process.cwd(), "estado.json");
+const ESTADO_FILE = path.resolve("./estado.json");
 
-const WATCHED_SERVICES = [
-  "Online on Steam",
+// Servicios que NO notificaremos si cambian
+const IGNORE_SERVICES = [
+  "SteamStat.us Page Views",
+  "Backend Steam Bot",
+  "In-Game on Steam",
+  "Dota 2 API",
+  "TF2 API",
+  "Deadlock API",
+  "Counter-Strike API",
+  "CS Sessions Logon",
+  "CS Player Inventories",
+  "CS Matchmaking Scheduler"
+];
+
+// Servicios que notificaremos si cambian
+const NOTIFY_SERVICES = [
   "Steam Connection Managers",
   "Steam Store",
   "Steam Community",
@@ -14,19 +28,10 @@ const WATCHED_SERVICES = [
   "Database"
 ];
 
-// Traducción de nombres
-const NAMES_ES = {
-  "Online on Steam": "Online en Steam",
-  "Steam Connection Managers": "Gestores de Conexión de Steam",
-  "Steam Store": "Tienda de Steam",
-  "Steam Community": "Comunidad de Steam",
-  "Steam Web API": "API Web de Steam",
-  "Database": "Database"
-};
-
-// Decide emoji según estado
+// Función para elegir emoji según estado
 function statusEmoji(status) {
   const s = status.toLowerCase();
+
   const match = s.match(/(\d+(\.\d+)?)%/);
   if (match) {
     const pct = parseFloat(match[1]);
@@ -34,33 +39,29 @@ function statusEmoji(status) {
     if (pct >= 70) return "🟡";
     return "🔴";
   }
+
   if (s.includes("normal") || s.includes("online") || s.includes("ok")) return "🟢";
   if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
   if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
-  return "⚪";
+
+  return "⚪"; // desconocido
 }
 
-// Leer estado previo
-function readState() {
-  try {
-    return JSON.parse(fs.readFileSync(STATE_FILE, "utf-8"));
-  } catch {
-    return {};
-  }
-}
-
-// Guardar estado actual
-function saveState(state) {
-  try {
-    fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2), "utf-8");
-  } catch (err) {
-    console.error("❌ Error guardando estado:", err);
+// Traducción simple de servicios
+function translate(name) {
+  switch (name) {
+    case "Steam Connection Managers": return "Gestores de Conexión de Steam";
+    case "Steam Store": return "Tienda de Steam";
+    case "Steam Community": return "Comunidad de Steam";
+    case "Steam Web API": return "API Web de Steam";
+    default: return name;
   }
 }
 
 async function getSteamStatus() {
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   const page = await browser.newPage();
+
   await page.goto("https://steamstat.us/", { waitUntil: "networkidle", timeout: 60000 });
   await page.waitForSelector(".services", { timeout: 60000 });
 
@@ -102,56 +103,53 @@ async function main() {
     process.exit(1);
   }
 
-  const prevState = readState();
   const { services, online, ingame, chartBuffer } = await getSteamStatus();
 
-  // Preparar servicios a mostrar y los que vigilamos
-  const watchedServices = {};
+  // Leer estado previo
+  let estado = {};
+  if (fs.existsSync(ESTADO_FILE)) {
+    const contenido = fs.readFileSync(ESTADO_FILE, "utf-8");
+    estado = contenido ? JSON.parse(contenido) : {};
+  }
+
+  // Filtrar servicios a mostrar y traducir
   const lines = [];
-  lines.push("**Estado de los Servicios de Steam**\n");
+  lines.push("**🟢 Estado de los Servicios de Steam**\n");
 
-  // Online + jugando
-  lines.push(`⚪ **Online en Steam:** ${ingame} jugando / ${online} online`);
-  watchedServices["Online on Steam"] = online;
+  lines.push(`**Online en Steam:** ${ingame} jugando / ${online} online`);
 
-  // Steam Connection Managers debajo
+  // Steam Connection Managers justo debajo
   if (services["Steam Connection Managers"]) {
     const scm = services["Steam Connection Managers"];
-    lines.push(`${statusEmoji(scm)} **Gestores de Conexión de Steam:** ${scm}`);
-    watchedServices["Steam Connection Managers"] = scm;
+    lines.push(`${statusEmoji(scm)} **${translate("Steam Connection Managers")}:** ${scm}`);
   }
 
-  // Otros servicios que queremos vigilar
-  for (const s of WATCHED_SERVICES) {
-    if (s === "Online on Steam" || s === "Steam Connection Managers") continue;
-    if (services[s]) {
-      lines.push(`${statusEmoji(services[s])} **${NAMES_ES[s] || s}:** ${services[s]}`);
-      watchedServices[s] = services[s];
-    }
-  }
-
-  // Mostrar servicios restantes pero no vigilados
   for (const [name, status] of Object.entries(services)) {
-    if (!WATCHED_SERVICES.includes(name)) {
-      lines.push(`${statusEmoji(status)} **${name}:** ${status}`);
+    if (!IGNORE_SERVICES.includes(name) && name !== "Steam Connection Managers") {
+      lines.push(`${statusEmoji(status)} **${translate(name)}:** ${status}`);
     }
   }
 
-  // Comparar con estado previo
-  let changed = false;
-  for (const key of Object.keys(watchedServices)) {
-    if (prevState[key] !== watchedServices[key]) {
-      changed = true;
-      break;
+  // Revisar si cambió alguno de los servicios importantes
+  let huboCambio = false;
+  for (const key of NOTIFY_SERVICES) {
+    const actual = services[key];
+    if (actual && estado[key] !== actual) {
+      estado[key] = actual;
+      huboCambio = true;
     }
   }
 
-  if (changed) {
+  // Guardar estado
+  fs.writeFileSync(ESTADO_FILE, JSON.stringify(estado, null, 2), "utf-8");
+
+  // Solo enviar mensaje si hubo cambio en servicios importantes
+  if (huboCambio) {
+    if (chartBuffer) lines.push("\n📊 **Gestores de Conexión de Steam (últimas 48h)**");
     await sendToDiscord(lines.join("\n"), chartBuffer);
     console.log("✅ Estado enviado a Discord");
-    saveState(watchedServices);
   } else {
-    console.log("ℹ️ No hubo cambios relevantes, no se envió nada");
+    console.log("ℹ️ No hubo cambios importantes, no se envió nada");
   }
 }
 
