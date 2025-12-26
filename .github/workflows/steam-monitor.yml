@@ -2,43 +2,38 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: "*/10 * * * *" # Cada 10 minutos
-  workflow_dispatch:
+    - cron: '*/10 * * * *' # cada 10 minutos
+  workflow_dispatch: # permite ejecución manual
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout del repositorio
-      - name: Checkout repo
-        uses: actions/checkout@v3
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
-      # 2. Instalar Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 20
+          node-version: '20'
 
-      # 3. Instalar dependencias
       - name: Install dependencies
         run: npm install
 
-      # 4. Descargar estado.json previo (si existe)
-      - name: Download previous estado.json
+      - name: Download previous estado.json (si existe)
         uses: actions/download-artifact@v4
         with:
           name: estado-json
-          path: ./  # mismo directorio de monitor.js
+          path: ./
+        continue-on-error: true
 
-      # 5. Ejecutar el monitor
-      - name: Run Steam Monitor
+      - name: Run Steam monitor
+        run: node monitor.js
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: node monitor.js
 
-      # 6. Subir estado.json actualizado
       - name: Upload updated estado.json
         uses: actions/upload-artifact@v4
         with:
           name: estado-json
-          path: ./estado.json
+          path: estado.json
