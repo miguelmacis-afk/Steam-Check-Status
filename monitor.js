@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import fetch from "node-fetch";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
@@ -15,6 +16,40 @@ const IGNORE_SERVICES = [
   "CS Player Inventories",
   "CS Matchmaking Scheduler"
 ];
+
+
+// Decide emoji según estado real
+function statusEmoji(status) {
+  const s = status.toLowerCase();
+
+  // Porcentaje (ej: 95.2% Online)
+  const match = s.match(/(\d+(\.\d+)?)%/);
+  if (match) {
+    const pct = parseFloat(match[1]);
+    if (pct >= 90) return "🟢";
+    if (pct >= 70) return "🟡";
+    return "🔴";
+  }
+
+  if (s.includes("normal") || s.includes("online") || s.includes("ok")) {
+    return "🟢";
+  }
+
+  if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) {
+    return "🟡";
+  }
+
+  if (
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("major") ||
+    s.includes("critical")
+  ) {
+    return "🔴";
+  }
+
+  return "⚪"; // desconocido
+}
 
 async function getSteamStatus() {
   const browser = await chromium.launch({
@@ -89,19 +124,24 @@ async function main() {
   }
 
   const lines = [];
-  lines.push("🟢 **Steam Services Status**\n");
+  lines.push("**Steam Services Status**\n");
 
-  // Online + jugando
-  lines.push(`🟢 **Online on Steam:** ${ingame} jugando / ${online} online`);
+  // Online / jugando
+  lines.push(
+    `${statusEmoji("online")} **Online on Steam:** ${ingame} jugando / ${online} online`
+  );
 
   // Steam Connection Managers justo debajo
   if (filtered["Steam Connection Managers"]) {
-    lines.push(`🟢 **Steam Connection Managers:** ${filtered["Steam Connection Managers"]}`);
+    const status = filtered["Steam Connection Managers"];
+    lines.push(
+      `${statusEmoji(status)} **Steam Connection Managers:** ${status}`
+    );
     delete filtered["Steam Connection Managers"];
   }
 
   for (const [name, status] of Object.entries(filtered)) {
-    lines.push(`🟢 **${name}:** ${status}`);
+    lines.push(`${statusEmoji(status)} **${name}:** ${status}`);
   }
 
   if (chartBuffer) {
