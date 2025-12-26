@@ -1,70 +1,78 @@
 import asyncio
-import requests
-from playwright.async_api import async_playwright
 import os
+import requests
+from bs4 import BeautifulSoup
+from playwright.async_api import async_playwright
 
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-STATUS_URL = "https://steamstats.us/lander"
+STEAMSTATS_URL = "https://steamstats.us/lander"
 
 async def get_steam_status():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)  # Cambiar a False para debug local
+        browser = await p.chromium.launch()
         page = await browser.new_page()
+        await page.goto(STEAMSTATS_URL, timeout=60000)
+
+        # Esperamos hasta 60s a que cargue la tabla, si no enviamos fallback
         try:
-            await page.goto(STATUS_URL, timeout=30000)
-            # Espera a que la tabla de estado cargue filas
-            await page.wait_for_function(
-                "document.querySelector('table') && document.querySelector('table').rows.length > 1",
-                timeout=30000
-            )
-
-            # Obtener todas las filas de la tabla
-            rows = await page.query_selector_all("table tr")
-            status_list = []
-            for row in rows:
-                cells = await row.query_selector_all("td")
-                if len(cells) >= 2:
-                    name = (await cells[0].inner_text()).strip()
-                    value = (await cells[1].inner_text()).strip()
-                    status_list.append((name, value))
-            return status_list
-        except Exception as e:
+            await page.wait_for_selector("table", state="visible", timeout=60000)
+        except Exception:
             await browser.close()
-            return f"ERROR: {e}"
-        finally:
-            await browser.close()
+            return {"error": "No se pudo cargar la tabla de SteamStats."}
 
-def format_discord_message(status):
-    if isinstance(status, str) and status.startswith("ERROR"):
-        return f"⚠️ {status}"
-    
-    # Emoji según estado
-    lines = []
-    for name, value in status:
-        if "Normal" in value or "Online" in value:
-            emoji = "🟢"
-        elif "Down" in value or "Offline" in value:
-            emoji = "🔴"
-        else:
-            emoji = "🟡"
-        lines.append(f"{emoji} **{name}:** {value}")
-    return "\n".join(lines)
+        content = await page.content()
+        await browser.close()
 
-def send_to_discord(message):
+        soup = BeautifulSoup(content, "html.parser")
+        table = soup.find("table")
+        if not table:
+            return {"error": "Tabla no encontrada en SteamStats."}
+
+        # Extraemos filas
+        status = {}
+        for row in table.find_all("tr"):
+            cols = row.find_all("td")
+            if len(cols) >= 2:
+                name = cols[0].text.strip()
+                state = cols[1].text.strip()
+                status[name] = state
+        return status
+
+def format_discord_message(status: dict) -> dict:
+    """Devuelve el payload formateado para Discord embed"""
+    if "error" in status:
+        return {"content": f"❌ {status['error']}"}
+
+    description = ""
+    for k, v in status.items():
+        emoji = "🟢" if "Normal" in v or "Online" in v else "🔴"
+        description += f"{emoji} **{k}**: {v}\n"
+
+    return {
+        "embeds": [
+            {
+                "title": "Steam Status Monitor",
+                "description": description,
+                "color": 3066993  # azul
+            }
+        ]
+    }
+
+def send_to_discord(payload):
     if not WEBHOOK_URL:
-        print("No se encontró WEBHOOK_URL en las variables de entorno.")
+        print("❌ WEBHOOK_URL no definido en secrets")
         return
-    payload = {"content": message}
-    try:
-        requests.post(WEBHOOK_URL, json=payload)
-    except Exception as e:
-        print(f"Error enviando a Discord: {e}")
+    response = requests.post(WEBHOOK_URL, json=payload)
+    if response.status_code != 204 and response.status_code != 200:
+        print(f"❌ Error enviando a Discord: {response.status_code} - {response.text}")
+    else:
+        print("✅ Mensaje enviado a Discord correctamente")
 
 async def main():
     status = await get_steam_status()
-    message = format_discord_message(status)
-    send_to_discord(message)
+    payload = format_discord_message(status)
+    send_to_discord(payload)
 
 if __name__ == "__main__":
     asyncio.run(main())
