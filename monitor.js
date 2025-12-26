@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import fetch from "node-fetch";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
@@ -26,7 +27,6 @@ async function getSteamStatus() {
     timeout: 60000
   });
 
-  // Esperar a que aparezcan los servicios
   await page.waitForSelector(".services", { timeout: 60000 });
 
   const data = await page.evaluate(() => {
@@ -43,7 +43,6 @@ async function getSteamStatus() {
     return { services, online, ingame };
   });
 
-  // Capturar gráfica CMS
   const chart = await page.$("#js-cms-chart");
   let chartBuffer = null;
   if (chart) {
@@ -59,10 +58,8 @@ async function sendToDiscord(message, chartBuffer) {
   form.append("content", message);
 
   if (chartBuffer) {
-    form.append("file", chartBuffer, {
-      filename: "steam_cms.png",
-      contentType: "image/png"
-    });
+    const blob = new Blob([chartBuffer], { type: "image/png" });
+    form.append("file", blob, "steam_cms.png");
   }
 
   await fetch(WEBHOOK_URL, {
@@ -79,40 +76,5 @@ async function main() {
 
   const { services, online, ingame, chartBuffer } = await getSteamStatus();
 
-  // Filtrar servicios
   const filtered = {};
-  for (const [name, status] of Object.entries(services)) {
-    if (IGNORE_SERVICES.includes(name)) continue;
-    filtered[name] = status;
-  }
-
-  // Construir mensaje
-  const lines = [];
-  lines.push("🟢 **Steam Services Status**\n");
-
-  // Online + In-Game fusionado
-  lines.push(`🟢 **Online on Steam:** ${ingame} jugando / ${online} online`);
-
-  // Steam Connection Managers debajo
-  if (filtered["Steam Connection Managers"]) {
-    lines.push(`🟢 **Steam Connection Managers:** ${filtered["Steam Connection Managers"]}`);
-    delete filtered["Steam Connection Managers"];
-  }
-
-  // Resto de servicios
-  for (const [name, status] of Object.entries(filtered)) {
-    lines.push(`🟢 **${name}:** ${status}`);
-  }
-
-  if (chartBuffer) {
-    lines.push("\n📊 **Steam Connection Managers (últimas 48h)**");
-  }
-
-  await sendToDiscord(lines.join("\n"), chartBuffer);
-  console.log("✅ Estado enviado a Discord");
-}
-
-main().catch(err => {
-  console.error("❌ Error:", err);
-  process.exit(1);
-});
+  for (const
