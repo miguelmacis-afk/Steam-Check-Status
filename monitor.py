@@ -1,90 +1,74 @@
-import asyncio
 import os
-import requests
-from bs4 import BeautifulSoup
+import asyncio
+import aiohttp
 from playwright.async_api import async_playwright
 
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-STEAMSTATS_URL = "https://steamstats.us/lander"
+# Almacena el estado anterior para detectar cambios
+previous_status = {}
 
 async def get_steam_status():
     async with async_playwright() as p:
         browser = await p.chromium.launch()
         page = await browser.new_page()
-        await page.goto(STEAMSTATS_URL, timeout=60000)
+        await page.goto("https://steamstats.us/lander", timeout=60000)
 
-        try:
-            # Espera hasta que la tabla tenga algo de contenido
-            await page.wait_for_function(
-                """() => {
-                    const t = document.querySelector('table');
-                    return t && t.innerText.length > 10;
-                }""",
-                timeout=60000
-            )
-        except Exception:
-            print("⚠️ Timeout cargando tabla, usando fallback")
-        
-        content = await page.content()
+        # Obtener todo el texto visible de la página
+        body_text = await page.locator("body").all_text_contents()
         await browser.close()
 
-        soup = BeautifulSoup(content, "html.parser")
-        table = soup.find("table")
-        if not table:
-            # fallback: buscar filas de texto en divs o preformateado
-            text = soup.get_text()
-            status = {}
-            for line in text.splitlines():
-                if ":" in line:
-                    key, val = line.split(":", 1)
-                    status[key.strip()] = val.strip()
-            return status
-
-        # Extraemos filas
         status = {}
-        for row in table.find_all("tr"):
-            cols = row.find_all("td")
-            if len(cols) >= 2:
-                name = cols[0].text.strip()
-                state = cols[1].text.strip()
-                status[name] = state
+        for line in body_text:
+            # Procesar líneas tipo "Steam ONLINE" o "Steam Market: Normal"
+            parts = line.split(":")
+            if len(parts) == 2:
+                key = parts[0].strip()
+                val = parts[1].strip()
+                status[key] = val
+            else:
+                # Líneas sin ":" las consideramos estado principal
+                line_clean = line.strip()
+                if line_clean:
+                    status[line_clean] = "✅" if "ONLINE" in line_clean else line_clean
         return status
 
-def format_discord_message(status: dict) -> dict:
-    """Devuelve el payload formateado para Discord embed"""
-    if "error" in status:
-        return {"content": f"❌ {status['error']}"}
+async def send_discord_message(content):
+    async with aiohttp.ClientSession() as session:
+        webhook_data = {"content": content}
+        async with session.post(WEBHOOK_URL, json=webhook_data) as resp:
+            if resp.status != 204:
+                text = await resp.text()
+                print("Error al enviar webhook:", resp.status, text)
 
-    description = ""
-    for k, v in status.items():
-        emoji = "🟢" if "Normal" in v or "Online" in v else "🔴"
-        description += f"{emoji} **{k}**: {v}\n"
-
-    return {
-        "embeds": [
-            {
-                "title": "Steam Status Monitor",
-                "description": description,
-                "color": 3066993  # azul
-            }
-        ]
-    }
-
-def send_to_discord(payload):
-    if not WEBHOOK_URL:
-        print("❌ WEBHOOK_URL no definido en secrets")
-        return
-    response = requests.post(WEBHOOK_URL, json=payload)
-    if response.status_code != 204 and response.status_code != 200:
-        print(f"❌ Error enviando a Discord: {response.status_code} - {response.text}")
-    else:
-        print("✅ Mensaje enviado a Discord correctamente")
+def format_status(status):
+    """Devuelve un string elegante para Discord con emojis"""
+    lines = []
+    for key, val in status.items():
+        emoji = "🟢" if "Normal" in val or "ONLINE" in val else "🔴"
+        lines.append(f"{emoji} **{key}:** {val}")
+    return "\n".join(lines)
 
 async def main():
-    status = await get_steam_status()
-    payload = format_discord_message(status)
-    send_to_discord(payload)
+    global previous_status
+    while True:
+        try:
+            current_status = await get_steam_status()
+        except Exception as e:
+            print("Error al obtener el estado de Steam:", e)
+            await asyncio.sleep(60)
+            continue
+
+        # Compara con el estado anterior
+        if current_status != previous_status:
+            previous_status = current_status
+            message = format_status(current_status)
+            print("Enviando actualización al Discord:\n", message)
+            await send_discord_message(message)
+        else:
+            print("Sin cambios desde la última verificación.")
+
+        await asyncio.sleep(300)  # Espera 5 minutos antes de la siguiente verificación
 
 if __name__ == "__main__":
     asyncio.run(main())
