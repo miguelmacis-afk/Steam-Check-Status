@@ -1,13 +1,9 @@
 import { chromium } from "playwright";
 import fs from "fs";
-import path from "path";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
+const estadoPath = "estado.json";
 
-// Ruta absoluta del JSON en el mismo directorio del JS
-const estadoPath = path.join(path.dirname(process.argv[1]), "estado.json");
-
-// Servicios que NO queremos mostrar
 const IGNORE_SERVICES = [
   "SteamStat.us Page Views",
   "Backend Steam Bot",
@@ -22,7 +18,6 @@ const IGNORE_SERVICES = [
   "CS Matchmaking Scheduler"
 ];
 
-// Servicios importantes a monitorear
 const ALERT_SERVICES = [
   "Steam Connection Managers",
   "Steam Store",
@@ -31,9 +26,9 @@ const ALERT_SERVICES = [
   "Database"
 ];
 
-// Decide emoji según estado real
 function statusEmoji(status) {
   const s = status.toLowerCase();
+
   const match = s.match(/(\d+(\.\d+)?)%/);
   if (match) {
     const pct = parseFloat(match[1]);
@@ -42,13 +37,12 @@ function statusEmoji(status) {
     return "🔴";
   }
 
-  if (s.includes("normal") || s.includes("online") || s.includes("ok")) return "🟢";
+  if (s.includes("normal") || s.includes("online") || s.includes("ok") || s.includes("recovered")) return "🟢";
   if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
   if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
-  return "⚪"; // desconocido
+  return "⚪";
 }
 
-// Traduce nombre de servicio al español
 function traducir(nombre) {
   const map = {
     "Online on Steam": "Online en Steam",
@@ -61,11 +55,18 @@ function traducir(nombre) {
   return map[nombre] || nombre;
 }
 
-// Simplifica el estado para guardarlo en JSON
-function estadoSimple(status) {
-  const s = status.toLowerCase();
-  if (s.includes("normal") || s.includes("online") || s.includes("%")) return "Normal";
-  return "Caído";
+function estadoGeneral(estado) {
+  let general = "🟢"; // por defecto normal
+  for (const value of Object.values(estado)) {
+    const s = value.toLowerCase();
+    if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) {
+      return "🔴";
+    }
+    if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) {
+      general = "🟡";
+    }
+  }
+  return general;
 }
 
 async function getSteamStatus() {
@@ -98,7 +99,6 @@ async function sendToDiscord(message, chartBuffer) {
   const form = new FormData();
   form.append("content", message);
   if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
-
   await fetch(WEBHOOK_URL, { method: "POST", body: form });
 }
 
@@ -120,7 +120,11 @@ async function main() {
     console.warn("⚠️ No se pudo leer estado.json:", err);
   }
 
-  // Filtrar servicios a mostrar
+  // Normalizar "Recovered" a "Normal"
+  for (const svc of Object.keys(prevEstado)) {
+    if (prevEstado[svc] === "Recovered") prevEstado[svc] = "Normal";
+  }
+
   const filtered = {};
   for (const [name, status] of Object.entries(services)) {
     if (!IGNORE_SERVICES.includes(name)) filtered[name] = status;
@@ -128,39 +132,35 @@ async function main() {
 
   // Construir mensaje
   const lines = [];
-  const onlinePct = parseInt(online.replace(/,/g, "")) || 0;
-  const generalEmoji = onlinePct > 0 ? "🟢" : "🔴";
+
+  // Emoji de estado general basado en servicios importantes
+  const newEstado = {};
+  for (const svc of ALERT_SERVICES) {
+    let value = services[svc] || "Desconocido";
+    if (value === "Recovered") value = "Normal";
+    newEstado[svc] = value;
+  }
+  const generalEmoji = estadoGeneral(newEstado);
   lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
 
-  // Online / jugando
   lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
 
-  // Steam Connection Managers justo debajo
   if (filtered["Steam Connection Managers"]) {
     const status = filtered["Steam Connection Managers"];
     lines.push(`${statusEmoji(status)} **Gestores de Conexión de Steam:** ${status}`);
     delete filtered["Steam Connection Managers"];
   }
 
-  // Mostrar los demás servicios, sin avisar de cambios
   for (const [name, status] of Object.entries(filtered)) {
     lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
   }
 
-  // Construir nuevo estado simplificado
+  // Comparar cambios solo en servicios importantes
   let changed = false;
-  const newEstado = {};
   for (const svc of ALERT_SERVICES) {
-    const valueRaw = services[svc] || "Desconocido";
-    const value = estadoSimple(valueRaw);
-
-    const prev = prevEstado[svc];
-    if (prev !== value) changed = true;
-
-    newEstado[svc] = value;
+    if (prevEstado[svc] !== newEstado[svc]) changed = true;
   }
 
-  // Guardar estado actualizado
   try {
     fs.writeFileSync(estadoPath, JSON.stringify(newEstado, null, 2), "utf-8");
     console.log("✅ Estado guardado correctamente");
@@ -168,7 +168,6 @@ async function main() {
     console.error("❌ No se pudo guardar estado.json:", err);
   }
 
-  // Enviar solo si cambió algún servicio importante
   if (changed) {
     await sendToDiscord(lines.join("\n"), chartBuffer);
     console.log("✅ Estado enviado a Discord");
