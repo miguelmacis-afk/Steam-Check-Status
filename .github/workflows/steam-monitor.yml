@@ -31,7 +31,7 @@ jobs:
           python monitor.py 2>&1 | tee logs/steam_status.log
 
       - name: Upload logs as artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: steam_status_logs
           path: logs/steam_status.log
