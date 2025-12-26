@@ -128,7 +128,7 @@ async function main() {
 
   // Online / jugando
   lines.push(
-    `$ **⚪Online on Steam:** ${ingame} jugando / ${online} online`
+    ` **⚪Online on Steam:** ${ingame} jugando / ${online} online`
   );
 
   // Steam Connection Managers justo debajo
