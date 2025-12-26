@@ -5,7 +5,7 @@ import path from "path";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 // Ruta absoluta del JSON en el mismo directorio del JS
-const estadoPath = path.join(process.cwd(), "estado.json");
+const estadoPath = "estado.json";
 
 // Servicios que NO queremos mostrar
 const IGNORE_SERVICES = [
