@@ -14,20 +14,32 @@ async def get_steam_status():
         page = await browser.new_page()
         await page.goto(STEAMSTATS_URL, timeout=60000)
 
-        # Esperamos hasta 60s a que cargue la tabla, si no enviamos fallback
         try:
-            await page.wait_for_selector("table", state="visible", timeout=60000)
+            # Espera hasta que la tabla tenga algo de contenido
+            await page.wait_for_function(
+                """() => {
+                    const t = document.querySelector('table');
+                    return t && t.innerText.length > 10;
+                }""",
+                timeout=60000
+            )
         except Exception:
-            await browser.close()
-            return {"error": "No se pudo cargar la tabla de SteamStats."}
-
+            print("⚠️ Timeout cargando tabla, usando fallback")
+        
         content = await page.content()
         await browser.close()
 
         soup = BeautifulSoup(content, "html.parser")
         table = soup.find("table")
         if not table:
-            return {"error": "Tabla no encontrada en SteamStats."}
+            # fallback: buscar filas de texto en divs o preformateado
+            text = soup.get_text()
+            status = {}
+            for line in text.splitlines():
+                if ":" in line:
+                    key, val = line.split(":", 1)
+                    status[key.strip()] = val.strip()
+            return status
 
         # Extraemos filas
         status = {}
