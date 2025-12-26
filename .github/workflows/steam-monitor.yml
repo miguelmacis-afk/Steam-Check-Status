@@ -1,19 +1,18 @@
 name: Steam Monitor
 
 on:
-  workflow_dispatch:  # Permite ejecutar manualmente
   schedule:
-    - cron: "*/5 * * * *"  # Cada 5 minutos
+    - cron: "*/10 * * * *" # cada 10 minutos
+  workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
+      - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.12"
@@ -27,5 +26,4 @@ jobs:
       - name: Run Steam Monitor
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-        run: |
-          python monitor.py
+        run: python monitor.py
