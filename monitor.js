@@ -9,6 +9,7 @@ const IGNORE_SERVICES = [
   "In-Game on Steam",
   "Dota 2 API",
   "TF2 API",
+  "Online on Steam",
   "Deadlock API",
   "Counter-Strike API",
   "CS Sessions Logon",
@@ -127,7 +128,7 @@ async function main() {
 
   // Online / jugando
   lines.push(
-    `${statusEmoji("online")} **Online on Steam:** ${ingame} jugando / ${online} online`
+    `$ **⚪Online on Steam:** ${ingame} jugando / ${online} online`
   );
 
   // Steam Connection Managers justo debajo
