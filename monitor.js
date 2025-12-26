@@ -1,6 +1,5 @@
 import { chromium } from "playwright";
 import fs from "fs";
-import fetch from "node-fetch";
 import path from "path";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
