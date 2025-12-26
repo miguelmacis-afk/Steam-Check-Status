@@ -1,0 +1,12 @@
+{
+  "name": "steam-monitor",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node monitor.js"
+  },
+  "dependencies": {
+    "playwright": "^1.44.0",
+    "axios": "^1.7.0"
+  }
+}
