@@ -1,6 +1,6 @@
 // monitor.js
 import { chromium } from 'playwright';
-import fetch from 'node-fetch';
+
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL; // Pon tu secret de GitHub
 
