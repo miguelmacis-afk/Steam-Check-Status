@@ -4,12 +4,10 @@ import axios from "axios";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 async function getSteamStatus() {
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
     const page = await browser.newPage();
-    await page.goto("https://steamstat.us/");
-
-    // Esperamos a que cargue la sección de estados
-    await page.waitForSelector("div.status-grid", { timeout: 60000 });
+await page.goto("https://steamstat.us/", { waitUntil: "networkidle" });
+await page.waitForSelector("div.status-grid", { timeout: 120000 }); // 2 minutos
 
     // Scrapeamos los servicios
     const services = await page.$$eval("div.status-grid div.service", nodes =>
