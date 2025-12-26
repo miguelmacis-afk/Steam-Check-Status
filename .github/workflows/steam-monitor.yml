@@ -2,32 +2,29 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: '*/10 * * * *'  # cada 10 minutos
-  workflow_dispatch: # permite ejecutar manualmente
+    - cron: '*/5 * * * *' # cada 5 minutos
+  workflow_dispatch:
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout
-      uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Configurar Node.js
-      uses: actions/setup-node@v3
-      with:
-        node-version: 20
+      - name: Setup Node.js
+        uses: actions/setup-node@v3
+        with:
+          node-version: '20'
 
-    - name: Instalar dependencias
-      run: npm install
-      working-directory: .
+      - name: Install dependencies
+        run: npm install
 
-    - name: Instalar navegadores de Playwright
-      run: npx playwright install
-      working-directory: .
+      - name: Install Playwright Browsers
+        run: npx playwright install
 
-    - name: Ejecutar monitor
-      env:
-        WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
-      run: node monitor.js
-      working-directory: .
+      - name: Run Monitor
+        env:
+          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: npm start
