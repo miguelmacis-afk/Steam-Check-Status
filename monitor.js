@@ -133,7 +133,7 @@ async function main() {
   lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
 
   // Online / jugando
-  lines.push(`**Online en Steam:** ${ingame} jugando / ${online} online`);
+  lines.push(`**⚪Online en Steam:** ${ingame} jugando / ${online} online`);
 
   // Steam Connection Managers justo debajo
   if (filtered["Steam Connection Managers"]) {
