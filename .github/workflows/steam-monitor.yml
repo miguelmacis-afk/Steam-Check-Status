@@ -2,8 +2,8 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: "*/10 * * * *"
-  workflow_dispatch:
+    - cron: '*/10 * * * *' # se ejecuta cada 10 minutos
+  workflow_dispatch:       # permite ejecutarlo manualmente
 
 jobs:
   monitor:
@@ -16,7 +16,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: "20"
+          node-version: '20'
 
       - name: Install dependencies
         run: npm install
@@ -24,24 +24,16 @@ jobs:
       - name: Install Playwright browsers
         run: npx playwright install
 
-      - name: Create estado.json if missing
-        run: |
-          if [ ! -f estado.json ]; then echo "{}" > estado.json; fi
-
-      - name: Download estado-json artifact (if exists)
-        uses: actions/download-artifact@v4
-        with:
-          name: estado-json
-          path: ./
-        continue-on-error: true
-
-      - name: Run the monitor
-        run: node monitor.js
+      - name: Run Steam Monitor
         env:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+        run: node monitor.js
 
-      - name: Upload updated estado.json
-        uses: actions/upload-artifact@v4
-        with:
-          name: estado-json
-          path: estado.json
+      - name: Commit estado.json if changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add estado.json
+          # Solo commit si hay cambios
+          git diff --cached --quiet || git commit -m "Update estado.json"
+          git push
