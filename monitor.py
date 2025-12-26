@@ -104,13 +104,22 @@ def main():
         if not services:
             raise Exception("HTML vacío")
     except Exception as e:
-        print(f"⚠️ Steamstat sin datos ({e})")
-        if "services" in prev_state:
-            services = prev_state["services"]
-            verified = False
-        else:
-            print("❌ No hay estado previo, se aborta")
-            return
+    print(f"⚠️ Steamstat sin datos ({e})")
+    verified = False
+
+    if "services" in prev_state:
+        services = prev_state["services"]
+    else:
+        # Primer arranque: estado desconocido inicial
+        services = {
+            "Steam Connection Managers": "Estado no verificado",
+            "Steam Store": "Estado no verificado",
+            "Steam Community": "Estado no verificado",
+            "Steam Web API": "Estado no verificado",
+            "Steam Workshop": "Estado no verificado",
+            "Steam Market": "Estado no verificado",
+            "Steam Support": "Estado no verificado",
+        }
 
     message, global_down = build_message(services, verified)
 
