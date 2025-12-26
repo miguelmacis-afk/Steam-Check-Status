@@ -1,89 +1,78 @@
 import os
 import asyncio
-from playwright.async_api import async_playwright
+import json
 import requests
+from playwright.async_api import async_playwright
 
+# URL del webhook de Discord (de GitHub Secrets)
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-last_report = {}
+# Archivo para guardar el estado anterior
+STATE_FILE = "steam_status.json"
 
-# Agrupación de servicios por categoría
-CATEGORIES = {
-    "Steam": ["Steam ONLINE", "Steam Connection Managers", "Steam Store", "Steam Community", 
-              "Steam Web API", "Steam Cloud", "Steam Workshop", "Steam Market", "Steam Support"],
-    "Regiones": ["Region NA", "Region EU", "Region ASIA"]
-}
+# Servicios de Steam que vamos a monitorear
+SERVICES = [
+    "Steam", "Connection Managers", "Store", "Community",
+    "Web API", "Cloud", "Workshop", "Market", "Support",
+    "Region NA", "Region EU", "Region ASIA"
+]
 
-async def fetch_steam_status():
+# Función para enviar mensaje al Discord usando embed
+def send_discord_embed(status):
+    embed = {
+        "title": "Steam Status Update",
+        "color": 3066993 if all(s == "Normal" or "Online" in s for s in status.values()) else 15158332,
+        "fields": [{"name": k, "value": v, "inline": True} for k, v in status.items()],
+        "footer": {"text": "Steam Monitor"}
+    }
+    data = {"embeds": [embed]}
+    response = requests.post(WEBHOOK_URL, json=data)
+    if response.status_code != 204:
+        print(f"Error sending Discord message: {response.text}")
+
+# Función para leer el estado previo guardado
+def load_previous_state():
+    if os.path.exists(STATE_FILE):
+        with open(STATE_FILE, "r") as f:
+            return json.load(f)
+    return {}
+
+# Función para guardar el estado actual
+def save_state(state):
+    with open(STATE_FILE, "w") as f:
+        json.dump(state, f, indent=2)
+
+# Función principal para monitorear Steam usando Playwright
+async def get_steam_status():
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
-        await page.goto("https://steamstat.us/")
-        
-        services = await page.query_selector_all(".services .service")
-        status_data = {}
+        await page.goto("https://steamstats.us/")  # Cambia si otra URL
+        await page.wait_for_selector("table")  # Espera a que cargue la tabla
 
-        for service in services:
-            name_el = await service.query_selector(".name")
-            status_el = await service.query_selector(".status")
-            if name_el and status_el:
-                name = (await name_el.inner_text()).strip()
-                status_text = (await status_el.inner_text()).strip()
-                emoji = "🟢" if "normal" in status_text.lower() or "online" in status_text.lower() else "🔴"
-                status_data[name] = f"{emoji} {status_text}"
+        status = {}
+        rows = await page.query_selector_all("table tr")
+        for row in rows:
+            cols = await row.query_selector_all("td")
+            if len(cols) >= 2:
+                service = (await cols[0].inner_text()).strip()
+                value = (await cols[1].inner_text()).strip()
+                if service in SERVICES:
+                    status[service] = value
 
         await browser.close()
-        return status_data
-
-def send_discord_embed(status_data: dict):
-    if not WEBHOOK_URL:
-        print("WEBHOOK_URL no configurado en secrets")
-        return
-    
-    # Determinar estado general
-    if any("🔴" in s for s in status_data.values()):
-        color = 15158332  # rojo
-        title = "❌ Steam OFFLINE / Problemas detectados"
-    elif any("🟡" in s for s in status_data.values()):
-        color = 16776960  # amarillo
-        title = "⚠️ Steam Con advertencias"
-    else:
-        color = 3066993  # verde
-        title = "🟢 Steam ONLINE ✅"
-    
-    # Crear campos agrupados
-    fields = []
-    for category, services in CATEGORIES.items():
-        value = ""
-        for service in services:
-            if service in status_data:
-                value += f"{status_data[service]}\n"
-        if value:
-            fields.append({"name": category, "value": value, "inline": True})
-
-    embed = {
-        "title": title,
-        "color": color,
-        "fields": fields,
-        "footer": {"text": "Última actualización"},
-    }
-
-    requests.post(WEBHOOK_URL, json={"embeds": [embed]})
+        return status
 
 async def main():
-    global last_report
-    while True:
-        try:
-            current_status = await fetch_steam_status()
-            current_key = str(current_status)
-            
-            if current_key != last_report.get("data"):
-                send_discord_embed(current_status)
-                last_report["data"] = current_key
-            
-            await asyncio.sleep(300)  # 5 minutos
-        except Exception as e:
-            requests.post(WEBHOOK_URL, json={"content": f"❌ Error al obtener estado: {e}"})
-            await asyncio.sleep(300)
+    previous_state = load_previous_state()
+    current_state = await get_steam_status()
+
+    # Compara estados
+    if current_state != previous_state:
+        send_discord_embed(current_state)
+        save_state(current_state)
+        print("State changed! Discord message sent.")
+    else:
+        print("No changes detected.")
 
 if __name__ == "__main__":
     asyncio.run(main())
