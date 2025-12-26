@@ -1,78 +1,70 @@
-import os
 import asyncio
-import json
 import requests
 from playwright.async_api import async_playwright
+import os
 
-# URL del webhook de Discord (de GitHub Secrets)
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
-# Archivo para guardar el estado anterior
-STATE_FILE = "steam_status.json"
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
 
-# Servicios de Steam que vamos a monitorear
-SERVICES = [
-    "Steam", "Connection Managers", "Store", "Community",
-    "Web API", "Cloud", "Workshop", "Market", "Support",
-    "Region NA", "Region EU", "Region ASIA"
-]
+STATUS_URL = "https://steamstats.us/lander"
 
-# Función para enviar mensaje al Discord usando embed
-def send_discord_embed(status):
-    embed = {
-        "title": "Steam Status Update",
-        "color": 3066993 if all(s == "Normal" or "Online" in s for s in status.values()) else 15158332,
-        "fields": [{"name": k, "value": v, "inline": True} for k, v in status.items()],
-        "footer": {"text": "Steam Monitor"}
-    }
-    data = {"embeds": [embed]}
-    response = requests.post(WEBHOOK_URL, json=data)
-    if response.status_code != 204:
-        print(f"Error sending Discord message: {response.text}")
-
-# Función para leer el estado previo guardado
-def load_previous_state():
-    if os.path.exists(STATE_FILE):
-        with open(STATE_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-# Función para guardar el estado actual
-def save_state(state):
-    with open(STATE_FILE, "w") as f:
-        json.dump(state, f, indent=2)
-
-# Función principal para monitorear Steam usando Playwright
 async def get_steam_status():
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
+        browser = await p.chromium.launch(headless=True)  # Cambiar a False para debug local
         page = await browser.new_page()
-        await page.goto("https://steamstats.us/")  # Cambia si otra URL
-        await page.wait_for_selector("table")  # Espera a que cargue la tabla
+        try:
+            await page.goto(STATUS_URL, timeout=30000)
+            # Espera a que la tabla de estado cargue filas
+            await page.wait_for_function(
+                "document.querySelector('table') && document.querySelector('table').rows.length > 1",
+                timeout=30000
+            )
 
-        status = {}
-        rows = await page.query_selector_all("table tr")
-        for row in rows:
-            cols = await row.query_selector_all("td")
-            if len(cols) >= 2:
-                service = (await cols[0].inner_text()).strip()
-                value = (await cols[1].inner_text()).strip()
-                if service in SERVICES:
-                    status[service] = value
+            # Obtener todas las filas de la tabla
+            rows = await page.query_selector_all("table tr")
+            status_list = []
+            for row in rows:
+                cells = await row.query_selector_all("td")
+                if len(cells) >= 2:
+                    name = (await cells[0].inner_text()).strip()
+                    value = (await cells[1].inner_text()).strip()
+                    status_list.append((name, value))
+            return status_list
+        except Exception as e:
+            await browser.close()
+            return f"ERROR: {e}"
+        finally:
+            await browser.close()
 
-        await browser.close()
-        return status
+def format_discord_message(status):
+    if isinstance(status, str) and status.startswith("ERROR"):
+        return f"⚠️ {status}"
+    
+    # Emoji según estado
+    lines = []
+    for name, value in status:
+        if "Normal" in value or "Online" in value:
+            emoji = "🟢"
+        elif "Down" in value or "Offline" in value:
+            emoji = "🔴"
+        else:
+            emoji = "🟡"
+        lines.append(f"{emoji} **{name}:** {value}")
+    return "\n".join(lines)
+
+def send_to_discord(message):
+    if not WEBHOOK_URL:
+        print("No se encontró WEBHOOK_URL en las variables de entorno.")
+        return
+    payload = {"content": message}
+    try:
+        requests.post(WEBHOOK_URL, json=payload)
+    except Exception as e:
+        print(f"Error enviando a Discord: {e}")
 
 async def main():
-    previous_state = load_previous_state()
-    current_state = await get_steam_status()
-
-    # Compara estados
-    if current_state != previous_state:
-        send_discord_embed(current_state)
-        save_state(current_state)
-        print("State changed! Discord message sent.")
-    else:
-        print("No changes detected.")
+    status = await get_steam_status()
+    message = format_discord_message(status)
+    send_to_discord(message)
 
 if __name__ == "__main__":
     asyncio.run(main())
