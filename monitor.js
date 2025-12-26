@@ -1,4 +1,5 @@
 import { chromium } from "playwright";
+import fs from "fs";
 
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 const STATE_FILE = "./estado.json";
