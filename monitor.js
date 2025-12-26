@@ -17,7 +17,6 @@ const IGNORE_SERVICES = [
   "CS Matchmaking Scheduler"
 ];
 
-
 // Decide emoji según estado real
 function statusEmoji(status) {
   const s = status.toLowerCase();
@@ -31,24 +30,36 @@ function statusEmoji(status) {
     return "🔴";
   }
 
-  if (s.includes("normal") || s.includes("online") || s.includes("ok")) {
-    return "🟢";
-  }
-
-  if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) {
-    return "🟡";
-  }
-
-  if (
-    s.includes("down") ||
-    s.includes("offline") ||
-    s.includes("major") ||
-    s.includes("critical")
-  ) {
-    return "🔴";
-  }
+  if (s.includes("normal") || s.includes("online") || s.includes("ok")) return "🟢";
+  if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
+  if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
 
   return "⚪"; // desconocido
+}
+
+// Determina emoji general según los servicios
+function overallSteamEmoji(services) {
+  let hasYellow = false;
+
+  for (const status of Object.values(services)) {
+    const emoji = statusEmoji(status);
+    if (emoji === "🔴") return "🔴";
+    if (emoji === "🟡") hasYellow = true;
+  }
+
+  return hasYellow ? "🟡" : "🟢";
+}
+
+// Traduce al español
+function translateService(name) {
+  const translations = {
+    "Online on Steam": "Online en Steam",
+    "Steam Connection Managers": "Gestores de Conexión de Steam",
+    "Steam Store": "Tienda de Steam",
+    "Steam Community": "Comunidad de Steam",
+    "Steam Web API": "API Web de Steam"
+  };
+  return translations[name] || name;
 }
 
 async function getSteamStatus() {
@@ -72,9 +83,7 @@ async function getSteamStatus() {
     document.querySelectorAll(".service").forEach(el => {
       const name = el.querySelector(".name")?.innerText?.trim();
       const status = el.querySelector(".status")?.innerText?.trim();
-      if (name && status) {
-        services[name] = status;
-      }
+      if (name && status) services[name] = status;
     });
 
     const online = document.querySelector("#online")?.innerText ?? "Desconocido";
@@ -85,9 +94,7 @@ async function getSteamStatus() {
 
   let chartBuffer = null;
   const chart = await page.$("#js-cms-chart");
-  if (chart) {
-    chartBuffer = await chart.screenshot();
-  }
+  if (chart) chartBuffer = await chart.screenshot();
 
   await browser.close();
   return { ...data, chartBuffer };
@@ -118,34 +125,30 @@ async function main() {
 
   const filtered = {};
   for (const [name, status] of Object.entries(services)) {
-    if (!IGNORE_SERVICES.includes(name)) {
-      filtered[name] = status;
-    }
+    if (!IGNORE_SERVICES.includes(name)) filtered[name] = status;
   }
 
+  const steamEmoji = overallSteamEmoji(filtered);
+
   const lines = [];
-  lines.push("**Steam Services Status**\n");
+  lines.push(`**${steamEmoji} Estado de los Servicios de Steam**\n`);
 
   // Online / jugando
-  lines.push(
-    ` **⚪Online on Steam:** ${ingame} jugando / ${online} online`
-  );
+  lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
 
   // Steam Connection Managers justo debajo
   if (filtered["Steam Connection Managers"]) {
     const status = filtered["Steam Connection Managers"];
-    lines.push(
-      `${statusEmoji(status)} **Steam Connection Managers:** ${status}`
-    );
+    lines.push(`${statusEmoji(status)} **${translateService("Steam Connection Managers")}:** ${status}`);
     delete filtered["Steam Connection Managers"];
   }
 
   for (const [name, status] of Object.entries(filtered)) {
-    lines.push(`${statusEmoji(status)} **${name}:** ${status}`);
+    lines.push(`${statusEmoji(status)} **${translateService(name)}:** ${status}`);
   }
 
   if (chartBuffer) {
-    lines.push("\n📊 **Steam Connection Managers (últimas 48h)**");
+    lines.push("\n📊 **Gestores de Conexión de Steam (últimas 48h)**");
   }
 
   await sendToDiscord(lines.join("\n"), chartBuffer);
