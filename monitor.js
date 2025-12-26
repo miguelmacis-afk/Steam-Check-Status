@@ -22,6 +22,7 @@ async function getSteamStatus() {
   });
 
   const page = await browser.newPage();
+
   await page.goto("https://steamstat.us/", {
     waitUntil: "networkidle",
     timeout: 60000
@@ -31,10 +32,13 @@ async function getSteamStatus() {
 
   const data = await page.evaluate(() => {
     const services = {};
+
     document.querySelectorAll(".service").forEach(el => {
       const name = el.querySelector(".name")?.innerText?.trim();
       const status = el.querySelector(".status")?.innerText?.trim();
-      if (name && status) services[name] = status;
+      if (name && status) {
+        services[name] = status;
+      }
     });
 
     const online = document.querySelector("#online")?.innerText ?? "Desconocido";
@@ -43,8 +47,8 @@ async function getSteamStatus() {
     return { services, online, ingame };
   });
 
-  const chart = await page.$("#js-cms-chart");
   let chartBuffer = null;
+  const chart = await page.$("#js-cms-chart");
   if (chart) {
     chartBuffer = await chart.screenshot();
   }
@@ -77,4 +81,37 @@ async function main() {
   const { services, online, ingame, chartBuffer } = await getSteamStatus();
 
   const filtered = {};
-  for (const
+  for (const [name, status] of Object.entries(services)) {
+    if (!IGNORE_SERVICES.includes(name)) {
+      filtered[name] = status;
+    }
+  }
+
+  const lines = [];
+  lines.push("🟢 **Steam Services Status**\n");
+
+  // Online + jugando
+  lines.push(`🟢 **Online on Steam:** ${ingame} jugando / ${online} online`);
+
+  // Steam Connection Managers justo debajo
+  if (filtered["Steam Connection Managers"]) {
+    lines.push(`🟢 **Steam Connection Managers:** ${filtered["Steam Connection Managers"]}`);
+    delete filtered["Steam Connection Managers"];
+  }
+
+  for (const [name, status] of Object.entries(filtered)) {
+    lines.push(`🟢 **${name}:** ${status}`);
+  }
+
+  if (chartBuffer) {
+    lines.push("\n📊 **Steam Connection Managers (últimas 48h)**");
+  }
+
+  await sendToDiscord(lines.join("\n"), chartBuffer);
+  console.log("✅ Estado enviado a Discord");
+}
+
+main().catch(err => {
+  console.error("❌ Error:", err);
+  process.exit(1);
+});
