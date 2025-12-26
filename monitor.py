@@ -15,7 +15,7 @@ CATEGORIES = {
 
 async def fetch_steam_status():
     async with async_playwright() as p:
-        browser = await p.chromium.launch()
+        browser = await p.chromium.launch(headless=True)
         page = await browser.new_page()
         await page.goto("https://steamstat.us/")
         
