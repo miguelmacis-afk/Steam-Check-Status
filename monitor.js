@@ -1,13 +1,18 @@
 import { chromium } from "playwright";
-import { Blob } from "buffer";
 
-const STEAM_URL = "https://steamstat.us/";
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
-if (!WEBHOOK_URL) {
-  console.error("WEBHOOK_URL no definido");
-  process.exit(1);
-}
+// Servicios que NO queremos mostrar
+const IGNORE_SERVICES = [
+  "SteamStat.us Page Views",
+  "Backend Steam Bot",
+  "TF2 API",
+  "Deadlock API",
+  "Counter-Strike API",
+  "CS Sessions Logon",
+  "CS Player Inventories",
+  "CS Matchmaking Scheduler"
+];
 
 async function getSteamStatus() {
   const browser = await chromium.launch({
@@ -15,78 +20,99 @@ async function getSteamStatus() {
     args: ["--no-sandbox", "--disable-setuid-sandbox"]
   });
 
-  const page = await browser.newPage({
-    viewport: { width: 1280, height: 900 }
+  const page = await browser.newPage();
+  await page.goto("https://steamstat.us/", {
+    waitUntil: "networkidle",
+    timeout: 60000
   });
 
-  await page.goto(STEAM_URL, { waitUntil: "networkidle" });
+  // Esperar a que aparezcan los servicios
+  await page.waitForSelector(".services", { timeout: 60000 });
 
-  // Esperar a que carguen los servicios (JS)
-  await page.waitForSelector(".services .service", { timeout: 60000 });
+  const data = await page.evaluate(() => {
+    const services = {};
+    document.querySelectorAll(".service").forEach(el => {
+      const name = el.querySelector(".name")?.innerText?.trim();
+      const status = el.querySelector(".status")?.innerText?.trim();
+      if (name && status) services[name] = status;
+    });
 
-  const services = await page.$$eval(".services .service", nodes =>
-    nodes.map(n => {
-      const name = n.querySelector(".name")?.innerText.trim() ?? "Desconocido";
-      const status = n.querySelector(".status")?.innerText.trim() ?? "Desconocido";
-      return { name, status };
-    })
-  );
+    const online = document.querySelector("#online")?.innerText ?? "Desconocido";
+    const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
 
-  // Screenshot SOLO del gráfico CMS
-  let chartBuffer = null;
+    return { services, online, ingame };
+  });
+
+  // Capturar gráfica CMS
   const chart = await page.$("#js-cms-chart");
+  let chartBuffer = null;
   if (chart) {
     chartBuffer = await chart.screenshot();
   }
 
   await browser.close();
-
-  return { services, chartBuffer };
+  return { ...data, chartBuffer };
 }
 
-function buildMessage(services) {
-  let msg = "🟢 **Steam Services Status**\n\n";
-
-  for (const s of services) {
-    let icon = "🟢";
-    if (/offline|down|error/i.test(s.status)) icon = "🔴";
-    if (/degraded|slow/i.test(s.status)) icon = "🟡";
-
-    msg += `${icon} **${s.name}**: ${s.status}\n`;
-  }
-
-  return msg;
-}
-
-async function sendToDiscord(message, imageBuffer) {
+async function sendToDiscord(message, chartBuffer) {
   const form = new FormData();
   form.append("content", message);
 
-  if (imageBuffer) {
-    const blob = new Blob([imageBuffer], { type: "image/png" });
-    form.append("file", blob, "steam_cms_chart.png");
+  if (chartBuffer) {
+    form.append("file", chartBuffer, {
+      filename: "steam_cms.png",
+      contentType: "image/png"
+    });
   }
 
-  const res = await fetch(WEBHOOK_URL, {
+  await fetch(WEBHOOK_URL, {
     method: "POST",
     body: form
   });
-
-  if (!res.ok) {
-    throw new Error(`Discord webhook error: ${res.status}`);
-  }
 }
 
 async function main() {
-  try {
-    const { services, chartBuffer } = await getSteamStatus();
-    const message = buildMessage(services);
-    await sendToDiscord(message, chartBuffer);
-    console.log("Estado enviado correctamente a Discord");
-  } catch (err) {
-    console.error("Error:", err.message);
+  if (!WEBHOOK_URL) {
+    console.error("❌ WEBHOOK_URL no definido");
     process.exit(1);
   }
+
+  const { services, online, ingame, chartBuffer } = await getSteamStatus();
+
+  // Filtrar servicios
+  const filtered = {};
+  for (const [name, status] of Object.entries(services)) {
+    if (IGNORE_SERVICES.includes(name)) continue;
+    filtered[name] = status;
+  }
+
+  // Construir mensaje
+  const lines = [];
+  lines.push("🟢 **Steam Services Status**\n");
+
+  // Online + In-Game fusionado
+  lines.push(`🟢 **Online on Steam:** ${ingame} jugando / ${online} online`);
+
+  // Steam Connection Managers debajo
+  if (filtered["Steam Connection Managers"]) {
+    lines.push(`🟢 **Steam Connection Managers:** ${filtered["Steam Connection Managers"]}`);
+    delete filtered["Steam Connection Managers"];
+  }
+
+  // Resto de servicios
+  for (const [name, status] of Object.entries(filtered)) {
+    lines.push(`🟢 **${name}:** ${status}`);
+  }
+
+  if (chartBuffer) {
+    lines.push("\n📊 **Steam Connection Managers (últimas 48h)**");
+  }
+
+  await sendToDiscord(lines.join("\n"), chartBuffer);
+  console.log("✅ Estado enviado a Discord");
 }
 
-main();
+main().catch(err => {
+  console.error("❌ Error:", err);
+  process.exit(1);
+});
