@@ -1,6 +1,5 @@
 import { chromium } from "playwright";
 
-// Tomamos el webhook desde el secret
 const WEBHOOK_URL = process.env.WEBHOOK_URL;
 
 async function getSteamStatus() {
@@ -8,21 +7,19 @@ async function getSteamStatus() {
     const page = await browser.newPage();
 
     try {
-        await page.goto("https://steamstat.us/");
+        await page.goto("https://steamstat.us/", { waitUntil: "networkidle" });
 
-        // Espera hasta que cargue la tabla de status
-        await page.waitForSelector("div.status-grid", { timeout: 60000 });
+        // Pequeña espera para que el JS renderice los bloques
+        await page.waitForTimeout(5000);
 
-        // Extraemos los datos
+        // Scrapeamos todos los divs que contengan 'service' en su clase
         const status = await page.evaluate(() => {
-            const blocks = document.querySelectorAll("div.status-grid div.status");
-            const results = [];
-            blocks.forEach(b => {
-                const name = b.querySelector("div.service-name")?.innerText.trim();
-                const stat = b.querySelector("div.service-status")?.innerText.trim();
-                if (name && stat) results.push({ name, stat });
+            const blocks = Array.from(document.querySelectorAll("div.service"));
+            return blocks.map(b => {
+                const name = b.querySelector("div.service-name")?.innerText.trim() || "Desconocido";
+                const stat = b.querySelector("div.service-status")?.innerText.trim() || "Desconocido";
+                return { name, stat };
             });
-            return results;
         });
 
         return status;
