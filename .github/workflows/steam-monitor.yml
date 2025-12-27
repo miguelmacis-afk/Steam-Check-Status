@@ -2,7 +2,7 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # se ejecuta cada 10 minutos
+    - cron: '*/5 * * * *' # se ejecuta cada 10 minutos
   workflow_dispatch:       # permite ejecutarlo manualmente
 
 jobs:
