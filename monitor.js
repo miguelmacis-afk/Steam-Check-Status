@@ -15,8 +15,7 @@ const IGNORE_SERVICES = [
   "Counter-Strike API",
   "CS Sessions Logon",
   "CS Player Inventories",
-  "CS Matchmaking Scheduler",
-  "Database"
+  "CS Matchmaking Scheduler"
 ];
 const SERVICE_IMPACT = {
   "Steam Store": [
