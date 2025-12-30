@@ -18,13 +18,50 @@ const IGNORE_SERVICES = [
   "CS Matchmaking Scheduler",
   "Database"
 ];
-
+const SERVICE_IMPACT = {
+  "Steam Store": [
+    "La tienda puede no cargar o mostrar errores",
+    "Compras y precios pueden no reflejarse correctamente",
+    "El carrito puede fallar"
+  ],
+  "Steam Community": [
+    "Perfiles pueden no cargar",
+    "Amigos y comentarios no aparecen",
+    "Mercado de la comunidad puede fallar"
+  ],
+  "Steam Web API": [
+    "Bots y aplicaciones externas pueden dejar de funcionar",
+    "Rust+, CS2, inventarios y stats pueden no actualizarse",
+    "Servidores pueden no validar datos correctamente"
+  ],
+  "Steam Connection Managers": [
+    "Problemas para conectarse a Steam",
+    "Desconexiones en juegos online",
+    "Latencia elevada o login fallido"
+  ],
+  "Database": [
+    "Retrasos en inventarios",
+    "Datos que no se actualizan",
+    "Cambios que tardan en reflejarse"
+  ]
+};
 const ALERT_SERVICES = [
   "Steam Store",
   "Steam Community",
   "Steam Web API"
 ];
-
+function isBadStatus(status) {
+  const s = status.toLowerCase();
+  return (
+    s.includes("down") ||
+    s.includes("offline") ||
+    s.includes("major") ||
+    s.includes("critical") ||
+    s.includes("slow") ||
+    s.includes("degraded") ||
+    s.includes("minor")
+  );
+}
 function statusEmoji(status) {
   const s = status.toLowerCase();
 
@@ -153,7 +190,25 @@ async function main() {
   for (const [name, status] of Object.entries(filtered)) {
     lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
   }
+const impactLines = [];
+const addedImpacts = new Set();
 
+for (const [service, status] of Object.entries(services)) {
+  if (!SERVICE_IMPACT[service]) continue;
+  if (!isBadStatus(status)) continue;
+
+  for (const impact of SERVICE_IMPACT[service]) {
+    if (!addedImpacts.has(impact)) {
+      impactLines.push(`• ${impact}`);
+      addedImpacts.add(impact);
+    }
+  }
+}
+
+if (impactLines.length > 0) {
+  lines.push("\n**⚠️ Posibles problemas que puedes notar:**");
+  lines.push(...impactLines);
+}
   // Comparar cambios solo en servicios importantes
   let changed = false;
   for (const svc of ALERT_SERVICES) {
