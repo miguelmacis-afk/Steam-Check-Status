@@ -15,14 +15,14 @@ const IGNORE_SERVICES = [
   "Counter-Strike API",
   "CS Sessions Logon",
   "CS Player Inventories",
-  "CS Matchmaking Scheduler"
+  "CS Matchmaking Scheduler",
+  "Database"
 ];
 
 const ALERT_SERVICES = [
   "Steam Store",
   "Steam Community",
-  "Steam Web API",
-  "Database"
+  "Steam Web API"
 ];
 
 function statusEmoji(status) {
