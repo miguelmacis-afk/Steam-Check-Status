@@ -1,6 +1,6 @@
 {
-  "Steam Store": "Very Slow",
+  "Steam Store": "Normal",
   "Steam Community": "Normal",
   "Steam Web API": "Normal",
-  "Database": "Normal"
+  "Database": "Store queue 32min delay"
 }
