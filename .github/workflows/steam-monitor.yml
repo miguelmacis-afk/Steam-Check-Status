@@ -26,7 +26,8 @@ jobs:
 
       - name: Run Steam Monitor
         env:
-          WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
+          WEBHOOK_URLS_CHANGES: ${{ secrets.WEBHOOK_URLS_CHANGES }}
+          WEBHOOK_URL_ERRORS: ${{ secrets.WEBHOOK_URL_ERRORS }}
         run: node monitor.js
 
       - name: Commit estado.json if changed
