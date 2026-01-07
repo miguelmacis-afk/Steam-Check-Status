@@ -1,8 +1,8 @@
 import { chromium } from "playwright";
 import fs from "fs";
 
-const WEBHOOK_URL = process.env.WEBHOOK_URL;
-const WEBHOOK_ERRORS = process.env.WEBHOOK_ERRORS; // 🔴 Nuevo webhook para errores
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
+const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
 const estadoPath = "estado.json";
 
 const IGNORE_SERVICES = [
@@ -68,6 +68,7 @@ function isBadStatus(status) {
 
 function statusEmoji(status) {
   const s = status.toLowerCase();
+
   const match = s.match(/(\d+(\.\d+)?)%/);
   if (match) {
     const pct = parseFloat(match[1]);
@@ -75,6 +76,7 @@ function statusEmoji(status) {
     if (pct >= 70) return "🟡";
     return "🔴";
   }
+
   if (s.includes("normal") || s.includes("online") || s.includes("ok") || s.includes("recovered")) return "🟢";
   if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
   if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
@@ -133,106 +135,117 @@ async function getSteamStatus() {
   return { ...data, chartBuffer };
 }
 
-async function sendToDiscord(message, chartBuffer, webhook = WEBHOOK_URL) {
-  if (!webhook) {
-    console.warn("❌ Webhook no definido");
-    return;
+async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
+  for (const hook of webhooks) {
+    if (!hook) continue;
+    const form = new FormData();
+    form.append("content", message);
+    if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
+    try {
+      await fetch(hook, { method: "POST", body: form });
+    } catch (err) {
+      console.warn("❌ Error enviando a Discord:", hook, err.message);
+    }
   }
-  const form = new FormData();
-  form.append("content", message);
-  if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
-  await fetch(webhook, { method: "POST", body: form });
 }
 
 async function main() {
+  if (!WEBHOOK_URLS_CHANGES?.length || !WEBHOOK_URL_ERRORS) {
+    console.error("❌ WEBHOOKS no definidos");
+    process.exit(1);
+  }
+
+  const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
+  const { services, online, ingame, chartBuffer } = await getSteamStatus();
+
+  // Leer estado previo
+  let prevEstado = {};
   try {
-    if (!WEBHOOK_URL) throw new Error("WEBHOOK_URL no definido");
-
-    const { services, online, ingame, chartBuffer } = await getSteamStatus();
-
-    let prevEstado = {};
-    try {
-      if (fs.existsSync(estadoPath)) {
-        prevEstado = JSON.parse(fs.readFileSync(estadoPath, "utf-8"));
-      }
-    } catch (err) {
-      console.warn("⚠️ No se pudo leer estado.json:", err);
-    }
-
-    for (const svc of Object.keys(prevEstado)) {
-      if (prevEstado[svc] === "Recovered") prevEstado[svc] = "Normal";
-    }
-
-    const filtered = {};
-    for (const [name, status] of Object.entries(services)) {
-      if (!IGNORE_SERVICES.includes(name)) filtered[name] = status;
-    }
-
-    const lines = [];
-    const newEstado = {};
-    for (const svc of ALERT_SERVICES) {
-      let value = services[svc] || "Desconocido";
-      if (value === "Recovered") value = "Normal";
-      newEstado[svc] = value;
-    }
-    const generalEmoji = estadoGeneral(newEstado);
-    lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
-    lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
-
-    if (filtered["Steam Connection Managers"]) {
-      const status = filtered["Steam Connection Managers"];
-      lines.push(`${statusEmoji(status)} **Gestores de Conexión de Steam:** ${status}`);
-      delete filtered["Steam Connection Managers"];
-    }
-    for (const [name, status] of Object.entries(filtered)) {
-      lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
-    }
-
-    const impactLines = [];
-    const addedImpacts = new Set();
-    for (const [service, status] of Object.entries(services)) {
-      if (!SERVICE_IMPACT[service]) continue;
-      if (!isBadStatus(status)) continue;
-      for (const impact of SERVICE_IMPACT[service]) {
-        if (!addedImpacts.has(impact)) {
-          impactLines.push(`• ${impact}`);
-          addedImpacts.add(impact);
-        }
-      }
-    }
-    if (impactLines.length > 0) {
-      lines.push("\n**⚠️ Posibles problemas que puedes notar:**");
-      lines.push(...impactLines);
-    }
-
-    let changed = false;
-    for (const svc of ALERT_SERVICES) {
-      if (prevEstado[svc] !== newEstado[svc]) changed = true;
-    }
-
-    try {
-      fs.writeFileSync(estadoPath, JSON.stringify(newEstado, null, 2), "utf-8");
-      console.log("✅ Estado guardado correctamente");
-    } catch (err) {
-      console.error("❌ No se pudo guardar estado.json:", err);
-      await sendToDiscord(`🚨 Error guardando estado.json:\n\`\`\`${err.message}\`\`\``, null, WEBHOOK_ERRORS);
-    }
-
-    if (changed) {
-      await sendToDiscord(lines.join("\n"), chartBuffer);
-      console.log("✅ Estado enviado a Discord");
-    } else {
-      console.log("ℹ️ No hay cambios relevantes, no se envió Discord");
+    if (fs.existsSync(estadoPath)) {
+      prevEstado = JSON.parse(fs.readFileSync(estadoPath, "utf-8"));
     }
   } catch (err) {
-    console.error("❌ Error en el monitor:", err);
-    await sendToDiscord(`🚨 Error en Steam Status Monitor:\n\`\`\`${err.message}\`\`\``, null, WEBHOOK_ERRORS);
-    process.exit(1);
+    console.warn("⚠️ No se pudo leer estado.json:", err);
+  }
+
+  for (const svc of Object.keys(prevEstado)) {
+    if (prevEstado[svc] === "Recovered") prevEstado[svc] = "Normal";
+  }
+
+  const filtered = {};
+  for (const [name, status] of Object.entries(services)) {
+    if (!IGNORE_SERVICES.includes(name)) filtered[name] = status;
+  }
+
+  const lines = [];
+  const newEstado = {};
+  for (const svc of ALERT_SERVICES) {
+    let value = services[svc] || "Desconocido";
+    if (value === "Recovered") value = "Normal";
+    newEstado[svc] = value;
+  }
+
+  const generalEmoji = estadoGeneral(newEstado);
+  lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
+  lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
+
+  if (filtered["Steam Connection Managers"]) {
+    const status = filtered["Steam Connection Managers"];
+    lines.push(`${statusEmoji(status)} **Gestores de Conexión de Steam:** ${status}`);
+    delete filtered["Steam Connection Managers"];
+  }
+
+  for (const [name, status] of Object.entries(filtered)) {
+    lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
+  }
+
+  const impactLines = [];
+  const addedImpacts = new Set();
+  for (const [service, status] of Object.entries(services)) {
+    if (!SERVICE_IMPACT[service]) continue;
+    if (!isBadStatus(status)) continue;
+    for (const impact of SERVICE_IMPACT[service]) {
+      if (!addedImpacts.has(impact)) {
+        impactLines.push(`• ${impact}`);
+        addedImpacts.add(impact);
+      }
+    }
+  }
+
+  if (impactLines.length > 0) {
+    lines.push("\n**⚠️ Posibles problemas que puedes notar:**");
+    lines.push(...impactLines);
+  }
+
+  // Detectar cambios
+  let changed = false;
+  for (const svc of ALERT_SERVICES) {
+    if (prevEstado[svc] !== newEstado[svc]) changed = true;
+  }
+
+  try {
+    fs.writeFileSync(estadoPath, JSON.stringify(newEstado, null, 2), "utf-8");
+    console.log("✅ Estado guardado correctamente");
+  } catch (err) {
+    console.error("❌ No se pudo guardar estado.json:", err);
+  }
+
+  if (changed) {
+    await sendToDiscord(lines.join("\n"), chartBuffer, changeHooks);
+    console.log("✅ Cambios enviados a Discord");
+  } else {
+    console.log("ℹ️ No hay cambios relevantes");
   }
 }
 
-main().catch(async (err) => {
-  console.error("❌ Error no capturado:", err);
-  await sendToDiscord(`🚨 Error no capturado en Steam Status Monitor:\n\`\`\`${err.message}\`\`\``, null, WEBHOOK_ERRORS);
+// Captura errores y los envía al webhook de errores
+main().catch(async err => {
+  console.error("❌ Error:", err);
+  const msg = `🚨 Error en el monitor de Steam:\n\`\`\`${err.message || err}\`\`\``;
+  try {
+    await sendToDiscord(msg, null, [WEBHOOK_URL_ERRORS]);
+  } catch (e) {
+    console.warn("❌ No se pudo notificar error a Discord:", e.message);
+  }
   process.exit(1);
 });
