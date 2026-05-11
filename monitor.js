@@ -1,8 +1,8 @@
 import { chromium } from "playwright";
 import fs from "fs";
 
-const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
-const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES;
+const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS;
 const estadoPath = "estado.json";
 
 const IGNORE_SERVICES = [
@@ -68,7 +68,6 @@ function isBadStatus(status) {
 
 function statusEmoji(status) {
   const s = status.toLowerCase();
-
   const match = s.match(/(\d+(\.\d+)?)%/);
   if (match) {
     const pct = parseFloat(match[1]);
@@ -76,7 +75,6 @@ function statusEmoji(status) {
     if (pct >= 70) return "🟡";
     return "🔴";
   }
-
   if (s.includes("normal") || s.includes("online") || s.includes("ok") || s.includes("recovered")) return "🟢";
   if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
   if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
@@ -99,40 +97,52 @@ function estadoGeneral(estado) {
   let general = "🟢";
   for (const value of Object.values(estado)) {
     const s = value.toLowerCase();
-    if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) {
-      return "🔴";
-    }
-    if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) {
-      general = "🟡";
-    }
+    if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
+    if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) general = "🟡";
   }
   return general;
 }
 
 async function getSteamStatus() {
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-  const page = await browser.newPage();
-  await page.goto("https://steamstat.us/", { waitUntil: "networkidle", timeout: 60000 });
-  await page.waitForSelector(".services", { timeout: 60000 });
-
-  const data = await page.evaluate(() => {
-    const services = {};
-    document.querySelectorAll(".service").forEach(el => {
-      const name = el.querySelector(".name")?.innerText?.trim();
-      const status = el.querySelector(".status")?.innerText?.trim();
-      if (name && status) services[name] = status;
-    });
-    const online = document.querySelector("#online")?.innerText ?? "Desconocido";
-    const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
-    return { services, online, ingame };
+  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
+  
+  // Usamos un User-Agent real para evitar ser detectados como bot básico
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   });
+  
+  const page = await context.newPage();
 
-  let chartBuffer = null;
-  const chart = await page.$("#js-cms-chart");
-  if (chart) chartBuffer = await chart.screenshot();
+  // BLOQUEO DE RECURSOS: Ahorra tiempo y evita timeouts por trackers/imágenes
+  await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,otf}', route => route.abort());
 
-  await browser.close();
-  return { ...data, chartBuffer };
+  try {
+    // Cambiado 'networkidle' por 'domcontentloaded' (más rápido y estable)
+    await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    
+    // Esperamos específicamente a que la tabla de servicios esté presente
+    await page.waitForSelector(".services", { timeout: 30000 });
+
+    const data = await page.evaluate(() => {
+      const services = {};
+      document.querySelectorAll(".service").forEach(el => {
+        const name = el.querySelector(".name")?.innerText?.trim();
+        const status = el.querySelector(".status")?.innerText?.trim();
+        if (name && status) services[name] = status;
+      });
+      const online = document.querySelector("#online")?.innerText ?? "Desconocido";
+      const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
+      return { services, online, ingame };
+    });
+
+    // Nota: El screenshot del chart fallará si bloqueamos CSS/Imágenes, 
+    // pero para monitorear estados es preferible la estabilidad del texto.
+    let chartBuffer = null;
+    return { ...data, chartBuffer };
+
+  } finally {
+    await browser.close();
+  }
 }
 
 async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
@@ -140,25 +150,25 @@ async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
     if (!hook) continue;
     const form = new FormData();
     form.append("content", message);
-    if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
+    if (chartBuffer) {
+        form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
+    }
     try {
-      await fetch(hook, { method: "POST", body: form });
+      await fetch(hook.trim(), { method: "POST", body: form });
     } catch (err) {
-      console.warn("❌ Error enviando a Discord:", hook, err.message);
+      console.warn("❌ Error enviando a Discord:", err.message);
     }
   }
 }
 
 async function main() {
-  if (!WEBHOOK_URLS_CHANGES?.length || !WEBHOOK_URL_ERRORS) {
-    console.error("❌ WEBHOOKS no definidos");
-    process.exit(1);
+  if (!WEBHOOK_URLS_CHANGES || !WEBHOOK_URL_ERRORS) {
+    throw new Error("WEBHOOKS no definidos en las variables de entorno");
   }
 
   const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
   const { services, online, ingame, chartBuffer } = await getSteamStatus();
 
-  // Leer estado previo
   let prevEstado = {};
   try {
     if (fs.existsSync(estadoPath)) {
@@ -166,10 +176,6 @@ async function main() {
     }
   } catch (err) {
     console.warn("⚠️ No se pudo leer estado.json:", err);
-  }
-
-  for (const svc of Object.keys(prevEstado)) {
-    if (prevEstado[svc] === "Recovered") prevEstado[svc] = "Normal";
   }
 
   const filtered = {};
@@ -217,18 +223,12 @@ async function main() {
     lines.push(...impactLines);
   }
 
-  // Detectar cambios
   let changed = false;
   for (const svc of ALERT_SERVICES) {
     if (prevEstado[svc] !== newEstado[svc]) changed = true;
   }
 
-  try {
-    fs.writeFileSync(estadoPath, JSON.stringify(newEstado, null, 2), "utf-8");
-    console.log("✅ Estado guardado correctamente");
-  } catch (err) {
-    console.error("❌ No se pudo guardar estado.json:", err);
-  }
+  fs.writeFileSync(estadoPath, JSON.stringify(newEstado, null, 2), "utf-8");
 
   if (changed) {
     await sendToDiscord(lines.join("\n"), chartBuffer, changeHooks);
@@ -238,14 +238,13 @@ async function main() {
   }
 }
 
-// Captura errores y los envía al webhook de errores
 main().catch(async err => {
-  console.error("❌ Error:", err);
-  const msg = `🚨 Error en el monitor de Steam:\n\`\`\`${err.message || err}\`\`\``;
+  console.error("❌ Error Crítico:", err);
+  const msg = `🚨 **Error en el monitor de Steam:**\n\`\`\`${err.message || err}\`\`\``;
   try {
     await sendToDiscord(msg, null, [WEBHOOK_URL_ERRORS]);
   } catch (e) {
-    console.warn("❌ No se pudo notificar error a Discord:", e.message);
+    console.warn("❌ Falló el envío de alerta de error:", e.message);
   }
   process.exit(1);
 });
