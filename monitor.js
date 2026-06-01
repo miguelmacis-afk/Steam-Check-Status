@@ -106,45 +106,55 @@ function estadoGeneral(estado) {
 async function getSteamStatus() {
   const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
   
-  // Usamos un User-Agent real para evitar ser detectados como bot básico
   const context = await browser.newContext({
     userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   });
   
   const page = await context.newPage();
 
-  // BLOQUEO DE RECURSOS: Ahorra tiempo y evita timeouts por trackers/imágenes
+  // NOTA: Si bloqueas CSS, es posible que el layout no se renderice bien. 
+  // Si sigue sin capturar nada, comenta la línea de abajo.
   await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,otf}', route => route.abort());
 
   try {
-    // Cambiado 'networkidle' por 'domcontentloaded' (más rápido y estable)
     await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
     
-    // Esperamos específicamente a que la tabla de servicios esté presente
-    await page.waitForSelector(".services", { timeout: 30000 });
+    // Esperamos a que los elementos que contienen la palabra "Steam" o "Store" aparezcan
+    await page.waitForSelector('body', { timeout: 30000 });
 
     const data = await page.evaluate(() => {
       const services = {};
-      document.querySelectorAll(".service").forEach(el => {
-        const name = el.querySelector(".name")?.innerText?.trim();
-        const status = el.querySelector(".status")?.innerText?.trim();
-        if (name && status) services[name] = status;
+      // Nueva lógica: buscamos todas las filas o contenedores de servicios
+      // En la nueva estructura, los servicios suelen ser divs dentro de una lista o sección
+      const elements = document.querySelectorAll('div'); 
+      
+      elements.forEach(el => {
+        const text = el.innerText;
+        // Buscamos patrones de servicio conocidos
+        const targets = ["Steam Store", "Steam Community", "Steam Web API", "Steam Connection Managers", "Database"];
+        
+        targets.forEach(target => {
+          if (text.includes(target) && !services[target]) {
+             // Esta lógica depende de la estructura visual, ajustamos según el vecino
+             const sibling = el.nextElementSibling || el.parentElement;
+             if (sibling) {
+               services[target] = sibling.innerText.split('\n')[0].trim();
+             }
+          }
+        });
       });
+
       const online = document.querySelector("#online")?.innerText ?? "Desconocido";
       const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
       return { services, online, ingame };
     });
 
-    // Nota: El screenshot del chart fallará si bloqueamos CSS/Imágenes, 
-    // pero para monitorear estados es preferible la estabilidad del texto.
-    let chartBuffer = null;
-    return { ...data, chartBuffer };
+    return { ...data, chartBuffer: null };
 
   } finally {
     await browser.close();
   }
 }
-
 async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
   for (const hook of webhooks) {
     if (!hook) continue;
