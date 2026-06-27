@@ -40,17 +40,21 @@ function statusEmoji(status) {
 
 async function getSteamStatus() {
   const browser = await chromium.launch({ headless: true, args: ["--no-sandbox", "--disable-setuid-sandbox"] });
-  const context = await browser.newContext();
+  
+  // Configuramos un User-Agent de navegador real para evitar bloqueos anti-bot / Cloudflare
+  const context = await browser.newContext({
+    userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+  });
   const page = await context.newPage();
 
-  // Bloqueamos recursos innecesarios para que cargue al instante
-  await page.route('**/*.{png,jpg,jpeg,gif,svg,css,woff,woff2,otf}', route => route.abort());
+  // Solo abortamos imágenes y otros recursos pesados, permitiendo cargar CSS para que renderice correctamente
+  await page.route('**/*.{png,jpg,jpeg,gif,svg}', route => route.abort());
 
   try {
-    await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.goto("https://steamstat.us/", { waitUntil: "networkidle", timeout: 60000 });
     
-    // Esperamos a que los selectores de los triggers actuales existan
-    await page.waitForSelector('#store', { timeout: 30000 });
+    // Damos un breve respiro para asegurar que el DOM y los scripts se ejecuten por completo
+    await page.waitForTimeout(3000);
 
     const data = await page.evaluate(() => {
       // Extraemos exactamente los IDs del nuevo documento web
@@ -58,8 +62,8 @@ async function getSteamStatus() {
       let cms = document.querySelector("#cms")?.innerText.trim() || "Desconocido";
       
       // Normalizamos la palabra "Recovered" a "Normal"
-      if (store === "Recovered") store = "Normal";
-      if (cms === "Recovered") cms = "Normal";
+      if (store.toLowerCase() === "recovered") store = "Normal";
+      if (cms.toLowerCase() === "recovered") cms = "Normal";
 
       return { store, cms };
     });
