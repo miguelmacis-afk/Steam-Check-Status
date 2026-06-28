@@ -122,9 +122,16 @@ async function getSteamStatus() {
   const context = await browser.newContext(); // Stealth plugin se encarga del User-Agent
   const page = await context.newPage();
   
-  // Usamos el contenedor principal como indicador de carga completa
-  await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForSelector(".services-container", { timeout: 60000 });
+  // Dentro de getSteamStatus...
+  try {
+    await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    await page.waitForSelector(".services", { timeout: 60000 });
+  } catch (error) {
+    // CAPTURA DE PANTALLA PARA DEPURACIÓN
+    await page.screenshot({ path: 'error_screenshot.png', fullPage: true });
+    console.error("❌ Falló la carga. Captura guardada como error_screenshot.png");
+    throw error; // Re-lanza el error para que el script falle como antes
+  }
 
   const data = await page.evaluate(() => {
     const services = {};
