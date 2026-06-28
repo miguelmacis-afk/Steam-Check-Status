@@ -1,4 +1,5 @@
 {
-  "store": "Desconocido",
-  "cms": "Desconocido"
+  "Steam Store": "Normal",
+  "Steam Community": "Normal",
+  "Steam Web API": "Normal"
 }
