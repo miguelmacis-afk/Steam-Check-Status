@@ -1,9 +1,13 @@
-import { chromium } from "playwright";
+import { chromium } from "playwright-extra";
+import stealthPlugin from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
 
-//const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
+// Activar el plugin de sigilo para evadir los bloqueos de Cloudflare
+chromium.use(stealthPlugin());
+
+// ⚠️ CORRECCIÓN: Tenías asignado process.env.WEBHOOK_URL_ERRORS a ambas variables
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
 const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
-const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
 
 const estadoPath = "estado.json";
 
@@ -114,33 +118,45 @@ function estadoGeneral(estado) {
 async function getSteamStatus() {
   const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
   
-  // 1. Crear un contexto con un User-Agent de un navegador real
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-  });
-  
-  // 2. Usar el contexto para abrir la página
+  const context = await browser.newContext(); // Stealth plugin se encarga del User-Agent
   const page = await context.newPage();
   
-  // 3. Usar domcontentloaded en lugar de networkidle
+  // Usamos el contenedor principal como indicador de carga completa
   await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForSelector(".services", { timeout: 60000 });
+  await page.waitForSelector(".services-container", { timeout: 60000 });
 
   const data = await page.evaluate(() => {
     const services = {};
-    document.querySelectorAll(".service").forEach(el => {
-      const name = el.querySelector(".name")?.innerText?.trim();
+    
+    // Filtramos explícitamente la columna de servicios principal (evitando regiones)
+    document.querySelectorAll(".services:not(.services-right) .service").forEach(el => {
+      const name = el.querySelector(".name")?.innerText?.replace(/\n/g, "")?.trim();
       const status = el.querySelector(".status")?.innerText?.trim();
       if (name && status) services[name] = status;
     });
+
     const online = document.querySelector("#online")?.innerText ?? "Desconocido";
     const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
-    return { services, online, ingame };
+    
+    // Extraemos si hay rebajas activas como extra
+    const loader = document.querySelector("#loader");
+    const ssrData = loader ? JSON.parse(loader.getAttribute("data-ssr")) : null;
+    const sale = ssrData?.sale || null;
+
+    return { services, online, ingame, sale };
   });
 
   let chartBuffer = null;
-  const chart = await page.$("#js-cms-chart");
-  if (chart) chartBuffer = await chart.screenshot();
+  try {
+    const chart = await page.$("#js-cms-chart");
+    if (chart) {
+      // Damos un margen mínimo para asegurar que el canvas se haya renderizado
+      await new Promise(r => setTimeout(r, 500));
+      chartBuffer = await chart.screenshot();
+    }
+  } catch (err) {
+    console.warn("⚠️ No se pudo capturar el gráfico de CMS:", err.message);
+  }
 
   await browser.close();
   return { ...data, chartBuffer };
@@ -151,7 +167,9 @@ async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
     if (!hook) continue;
     const form = new FormData();
     form.append("content", message);
-    if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
+    if (chartBuffer) {
+      form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
+    }
     try {
       await fetch(hook, { method: "POST", body: form });
     } catch (err) {
@@ -167,7 +185,7 @@ async function main() {
   }
 
   const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
-  const { services, online, ingame, chartBuffer } = await getSteamStatus();
+  const { services, online, ingame, sale, chartBuffer } = await getSteamStatus();
 
   // Leer estado previo
   let prevEstado = {};
@@ -198,6 +216,11 @@ async function main() {
 
   const generalEmoji = estadoGeneral(newEstado);
   lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
+  
+  if (sale) {
+    lines.push(`🎉 **Evento Activo:** ${sale}\n`);
+  }
+  
   lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
 
   if (filtered["Steam Connection Managers"]) {
