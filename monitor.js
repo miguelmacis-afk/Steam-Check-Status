@@ -1,9 +1,9 @@
 import { chromium } from "playwright";
 import fs from "fs";
 
-//const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
 const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
-const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
+//const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
 
 const estadoPath = "estado.json";
 
