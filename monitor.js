@@ -6,8 +6,9 @@ import fs from "fs";
 chromium.use(stealthPlugin());
 
 // ⚠️ CORRECCIÓN: Tenías asignado process.env.WEBHOOK_URL_ERRORS a ambas variables
-const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
+//const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
 const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
 
 const estadoPath = "estado.json";
 
