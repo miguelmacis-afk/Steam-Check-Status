@@ -34,6 +34,13 @@ jobs:
           WEBHOOK_URLS_CHANGES: ${{ secrets.WEBHOOK_URLS_CHANGES }}
           WEBHOOK_URL_ERRORS: ${{ secrets.WEBHOOK_URL_ERRORS }}
         run: node monitor.js # Asegúrate de que coincida con el nombre de tu archivo principal (ej. monitor.js o index.js)
+        
+      - name: Upload Debug Screenshot
+        if: failure() # Esto solo se ejecuta si el paso anterior falla
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-screenshot
+          path: error_screenshot.png
 
       - name: Commit estado.json if changed
         run: |
