@@ -124,7 +124,14 @@ async function getSteamStatus() {
   
   // 3. Usar domcontentloaded en lugar de networkidle
   await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
-  await page.waitForSelector(".services", { timeout: 60000 });
+  try {
+    await page.waitForSelector(".services", { timeout: 60000 });
+  } catch (error) {
+    // Si falla, tomamos una captura para ver la pantalla de Cloudflare
+    await page.screenshot({ path: "error_carga.png" });
+    console.error("❌ No se encontró '.services'. Captura guardada como error_carga.png");
+    throw error; 
+  }
 
   const data = await page.evaluate(() => {
     const services = {};
