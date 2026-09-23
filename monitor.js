@@ -1,27 +1,14 @@
-import { chromium } from "playwright-extra";
-import stealth from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
-
-// Activar plugin de evasión de detección de bots
-chromium.use(stealth());
 
 const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES;
 const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS;
 
 const estadoPath = "estado.json";
 
-const IGNORE_SERVICES = [
-  "SteamStat.us Page Views",
-  "Backend Steam Bot",
-  "In-Game on Steam",
-  "Dota 2 API",
-  "TF2 API",
-  "Online on Steam",
-  "Deadlock API",
-  "Counter-Strike API",
-  "CS Sessions Logon",
-  "CS Player Inventories",
-  "CS Matchmaking Scheduler"
+const ALERT_SERVICES = [
+  "Steam Store",
+  "Steam Community",
+  "Steam Web API"
 ];
 
 const SERVICE_IMPACT = {
@@ -39,63 +26,22 @@ const SERVICE_IMPACT = {
     "Bots y aplicaciones externas pueden dejar de funcionar",
     "Rust+, CS2, inventarios y stats pueden no actualizarse",
     "Servidores pueden no validar datos correctamente"
-  ],
-  "Steam Connection Managers": [
-    "Problemas para conectarse a Steam",
-    "Desconexiones en juegos online",
-    "Latencia elevada o login fallido"
-  ],
-  "Database": [
-    "Retrasos en inventarios",
-    "Datos que no se actualizan",
-    "Cambios que tardan en reflejarse"
   ]
 };
 
-const ALERT_SERVICES = [
-  "Steam Store",
-  "Steam Community",
-  "Steam Web API"
-];
-
-function isBadStatus(status) {
-  const s = status.toLowerCase();
-  return (
-    s.includes("down") ||
-    s.includes("offline") ||
-    s.includes("major") ||
-    s.includes("critical") ||
-    s.includes("slow") ||
-    s.includes("degraded") ||
-    s.includes("minor")
-  );
-}
-
 function statusEmoji(status) {
   const s = status.toLowerCase();
-
-  const match = s.match(/(\d+(\.\d+)?)%/);
-  if (match) {
-    const pct = parseFloat(match[1]);
-    if (pct >= 90) return "🟢";
-    if (pct >= 70) return "🟡";
-    return "🔴";
-  }
-
-  if (s.includes("normal") || s.includes("online") || s.includes("ok") || s.includes("recovered")) return "🟢";
-  if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) return "🟡";
-  if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) return "🔴";
+  if (s.includes("normal") || s.includes("online") || s.includes("ok")) return "🟢";
+  if (s.includes("slow") || s.includes("degraded") || s.includes("timeout")) return "🟡";
+  if (s.includes("down") || s.includes("error") || s.includes("refused")) return "🔴";
   return "⚪";
 }
 
 function traducir(nombre) {
   const map = {
-    "Online on Steam": "Online en Steam",
-    "Steam Connection Managers": "Gestores de Conexión de Steam",
     "Steam Store": "Tienda de Steam",
     "Steam Community": "Comunidad de Steam",
-    "Steam Web API": "API Web de Steam",
-    "Database": "Base de Datos"
+    "Steam Web API": "API Web de Steam"
   };
   return map[nombre] || nombre;
 }
@@ -104,80 +50,70 @@ function estadoGeneral(estado) {
   let general = "🟢";
   for (const value of Object.values(estado)) {
     const s = value.toLowerCase();
-    if (s.includes("down") || s.includes("offline") || s.includes("major") || s.includes("critical")) {
+    if (s.includes("down") || s.includes("error")) {
       return "🔴";
     }
-    if (s.includes("slow") || s.includes("degraded") || s.includes("minor")) {
+    if (s.includes("slow") || s.includes("timeout")) {
       general = "🟡";
     }
   }
   return general;
 }
 
-async function getSteamStatus() {
-  // Usa Google Chrome real preinstalado en la máquina de GitHub Actions
-  const browser = await chromium.launch({ 
-    channel: "chrome",
-    headless: false, 
-    args: [
-      "--no-sandbox",
-      "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage",
-      "--disable-blink-features=AutomationControlled"
-    ] 
-  });
-  
-  const context = await browser.newContext({
-    viewport: { width: 1366, height: 768 },
-    locale: 'es-ES',
-    timezoneId: 'Europe/Madrid',
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
-  });
-  
-  const page = await context.newPage();
+async function checkEndpoint(url, timeoutMs = 8000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeoutMs);
+  const start = Date.now();
 
   try {
-    await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
-    
-    // Espera ampliada a 10 segundos para resolver la verificación de Cloudflare
-    await page.waitForTimeout(10000);
-    
-    await page.waitForSelector(".services", { timeout: 60000 });
-  } catch (error) {
-    await page.screenshot({ path: "error_carga.png", fullPage: true });
-    console.error("❌ No se encontró '.services'. Captura guardada como error_carga.png");
-    await browser.close();
-    throw error; 
-  }
-
-  const data = await page.evaluate(() => {
-    const services = {};
-    document.querySelectorAll(".service").forEach(el => {
-      const name = el.querySelector(".name")?.innerText?.trim();
-      const status = el.querySelector(".status")?.innerText?.trim();
-      if (name && status) services[name] = status;
+    const res = await fetch(url, {
+      signal: controller.signal,
+      headers: {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"
+      }
     });
-    const online = document.querySelector("#online")?.innerText ?? "Desconocido";
-    const ingame = document.querySelector("#ingame")?.innerText ?? "Desconocido";
-    return { services, online, ingame };
-  });
+    clearTimeout(id);
+    const duration = Date.now() - start;
 
-  let chartBuffer = null;
-  const chart = await page.$("#js-cms-chart");
-  if (chart) chartBuffer = await chart.screenshot();
-
-  await browser.close();
-  return { ...data, chartBuffer };
+    if (!res.ok && res.status !== 403) {
+      return `Caído (HTTP ${res.status})`;
+    }
+    if (duration > 3500) {
+      return `Lento (${duration}ms)`;
+    }
+    return "Normal";
+  } catch (err) {
+    clearTimeout(id);
+    if (err.name === "AbortError") return "Lento (Timeout)";
+    return "Caído / Sin conexión";
+  }
 }
 
-async function sendToDiscord(message, chartBuffer = null, webhooks = []) {
+async function getSteamStatus() {
+  const [storeStatus, communityStatus, apiStatus] = await Promise.all([
+    checkEndpoint("https://store.steampowered.com/"),
+    checkEndpoint("https://steamcommunity.com/"),
+    checkEndpoint("https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v0001/")
+  ]);
+
+  return {
+    services: {
+      "Steam Store": storeStatus,
+      "Steam Community": communityStatus,
+      "Steam Web API": apiStatus
+    }
+  };
+}
+
+async function sendToDiscord(message, webhooks = []) {
   for (const hook of webhooks) {
     if (!hook) continue;
-    const form = new FormData();
-    form.append("content", message);
-    if (chartBuffer) form.append("file", new Blob([chartBuffer], { type: "image/png" }), "steam_cms.png");
     try {
-      await fetch(hook, { method: "POST", body: form });
+      await fetch(hook, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: message })
+      });
     } catch (err) {
       console.warn("❌ Error enviando a Discord:", hook, err.message);
     }
@@ -191,7 +127,7 @@ async function main() {
   }
 
   const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
-  const { services, online, ingame, chartBuffer } = await getSteamStatus();
+  const { services } = await getSteamStatus();
 
   let prevEstado = {};
   try {
@@ -202,46 +138,30 @@ async function main() {
     console.warn("⚠️ No se pudo leer estado.json:", err);
   }
 
-  for (const svc of Object.keys(prevEstado)) {
-    if (prevEstado[svc] === "Recovered") prevEstado[svc] = "Normal";
-  }
-
-  const filtered = {};
-  for (const [name, status] of Object.entries(services)) {
-    if (!IGNORE_SERVICES.includes(name)) filtered[name] = status;
-  }
-
   const lines = [];
   const newEstado = {};
   for (const svc of ALERT_SERVICES) {
-    let value = services[svc] || "Desconocido";
-    if (value === "Recovered") value = "Normal";
-    newEstado[svc] = value;
+    newEstado[svc] = services[svc] || "Desconocido";
   }
 
   const generalEmoji = estadoGeneral(newEstado);
   lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
-  lines.push(`**⚪ Online en Steam:** ${ingame} jugando / ${online} online`);
 
-  if (filtered["Steam Connection Managers"]) {
-    const status = filtered["Steam Connection Managers"];
-    lines.push(`${statusEmoji(status)} **Gestores de Conexión de Steam:** ${status}`);
-    delete filtered["Steam Connection Managers"];
-  }
-
-  for (const [name, status] of Object.entries(filtered)) {
+  for (const [name, status] of Object.entries(newEstado)) {
     lines.push(`${statusEmoji(status)} **${traducir(name)}:**${status}`);
   }
 
   const impactLines = [];
   const addedImpacts = new Set();
-  for (const [service, status] of Object.entries(services)) {
+  for (const [service, status] of Object.entries(newEstado)) {
     if (!SERVICE_IMPACT[service]) continue;
-    if (!isBadStatus(status)) continue;
-    for (const impact of SERVICE_IMPACT[service]) {
-      if (!addedImpacts.has(impact)) {
-        impactLines.push(`• ${impact}`);
-        addedImpacts.add(impact);
+    const s = status.toLowerCase();
+    if (s.includes("caído") || s.includes("lento") || s.includes("error")) {
+      for (const impact of SERVICE_IMPACT[service]) {
+        if (!addedImpacts.has(impact)) {
+          impactLines.push(`• ${impact}`);
+          addedImpacts.add(impact);
+        }
       }
     }
   }
@@ -264,10 +184,10 @@ async function main() {
   }
 
   if (changed) {
-    await sendToDiscord(lines.join("\n"), chartBuffer, changeHooks);
+    await sendToDiscord(lines.join("\n"), changeHooks);
     console.log("✅ Cambios enviados a Discord");
   } else {
-    console.log("ℹ️ No hay cambios relevantes");
+    console.log("ℹ️ No hay cambios en el estado de Steam");
   }
 }
 
@@ -275,7 +195,7 @@ main().catch(async err => {
   console.error("❌ Error:", err);
   const msg = `🚨 Error en el monitor de Steam:\n\`\`\`${err.message || err}\`\`\``;
   try {
-    await sendToDiscord(msg, null, [WEBHOOK_URL_ERRORS]);
+    await sendToDiscord(msg, [WEBHOOK_URL_ERRORS]);
   } catch (e) {
     console.warn("❌ No se pudo notificar error a Discord:", e.message);
   }
