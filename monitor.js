@@ -115,13 +115,15 @@ function estadoGeneral(estado) {
 }
 
 async function getSteamStatus() {
-  // headless: false fuerza el renderizado con interfaz gráfica visual (manejado vía xvfb en Linux)
+  // Usa Google Chrome real preinstalado en la máquina de GitHub Actions
   const browser = await chromium.launch({ 
+    channel: "chrome",
     headless: false, 
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-dev-shm-usage"
+      "--disable-dev-shm-usage",
+      "--disable-blink-features=AutomationControlled"
     ] 
   });
   
@@ -129,9 +131,7 @@ async function getSteamStatus() {
     viewport: { width: 1366, height: 768 },
     locale: 'es-ES',
     timezoneId: 'Europe/Madrid',
-    extraHTTPHeaders: {
-      'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
-    }
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36'
   });
   
   const page = await context.newPage();
@@ -139,8 +139,8 @@ async function getSteamStatus() {
   try {
     await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
     
-    // Tiempo de espera para la resolución del comprobador Turnstile / Cloudflare
-    await page.waitForTimeout(6000);
+    // Espera ampliada a 10 segundos para resolver la verificación de Cloudflare
+    await page.waitForTimeout(10000);
     
     await page.waitForSelector(".services", { timeout: 60000 });
   } catch (error) {
