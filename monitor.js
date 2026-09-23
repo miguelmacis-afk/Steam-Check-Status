@@ -8,24 +8,33 @@ const estadoPath = "estado.json";
 const ALERT_SERVICES = [
   "Steam Store",
   "Steam Community",
-  "Steam Web API"
+  "Steam Web API",
+  "Steam Market",
+  "Steam Support",
+  "Connection Managers"
 ];
 
 const SERVICE_IMPACT = {
   "Steam Store": [
     "La tienda puede no cargar o mostrar errores",
-    "Compras y precios pueden no reflejarse correctamente",
-    "El carrito puede fallar"
+    "Compras y precios pueden no reflejarse correctamente"
   ],
   "Steam Community": [
     "Perfiles pueden no cargar",
-    "Amigos y comentarios no aparecen",
-    "Mercado de la comunidad puede fallar"
+    "Amigos y comentarios no aparecen"
   ],
   "Steam Web API": [
     "Bots y aplicaciones externas pueden dejar de funcionar",
-    "Rust+, CS2, inventarios y stats pueden no actualizarse",
-    "Servidores pueden no validar datos correctamente"
+    "Inventarios y stats de juegos pueden no actualizarse"
+  ],
+  "Steam Market": [
+    "Compras y ventas en el mercado pueden fallar o dar error"
+  ],
+  "Steam Support": [
+    "No se pueden enviar tickets ni recuperar cuentas"
+  ],
+  "Connection Managers": [
+    "Problemas para iniciar sesión o mantenerte conectado al cliente de Steam"
   ]
 };
 
@@ -41,7 +50,10 @@ function traducir(nombre) {
   const map = {
     "Steam Store": "Tienda de Steam",
     "Steam Community": "Comunidad de Steam",
-    "Steam Web API": "API Web de Steam"
+    "Steam Web API": "API Web de Steam",
+    "Steam Market": "Mercado de la Comunidad",
+    "Steam Support": "Soporte de Steam",
+    "Connection Managers": "Gestores de Conexión (CM)"
   };
   return map[nombre] || nombre;
 }
@@ -76,10 +88,7 @@ async function checkEndpoint(url, timeoutMs = 8000) {
     const duration = Date.now() - start;
 
     if (!res.ok && res.status !== 403) {
-      return `Caído (HTTP ${res.status})`;
-    }
-    if (duration > 3500) {
-      return `Lento (${duration}ms)`;
+      return `Caído (HTTP ${res.status})`;     }     if (duration > 3500) {       return `Lento (${duration}ms)`;
     }
     return "Normal";
   } catch (err) {
@@ -90,17 +99,23 @@ async function checkEndpoint(url, timeoutMs = 8000) {
 }
 
 async function getSteamStatus() {
-  const [storeStatus, communityStatus, apiStatus] = await Promise.all([
+  const [store, community, api, market, support, cmList] = await Promise.all([
     checkEndpoint("https://store.steampowered.com/"),
     checkEndpoint("https://steamcommunity.com/"),
-    checkEndpoint("https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v0001/")
+    checkEndpoint("https://api.steampowered.com/ISteamWebAPIUtil/GetServerInfo/v0001/"),
+    checkEndpoint("https://steamcommunity.com/market/"),
+    checkEndpoint("https://help.steampowered.com/"),
+    checkEndpoint("https://api.steampowered.com/ISteamDirectory/GetCMList/v1/?cellid=0")
   ]);
 
   return {
     services: {
-      "Steam Store": storeStatus,
-      "Steam Community": communityStatus,
-      "Steam Web API": apiStatus
+      "Steam Store": store,
+      "Steam Community": community,
+      "Steam Web API": api,
+      "Steam Market": market,
+      "Steam Support": support,
+      "Connection Managers": cmList
     }
   };
 }
@@ -145,21 +160,10 @@ async function main() {
   }
 
   const generalEmoji = estadoGeneral(newEstado);
-  lines.push(`**${generalEmoji} Estado de los Servicios de Steam**\n`);
+  lines.push(`**${generalEmoji} Estado Ampliado de Servicios de Steam**\n`);
 
   for (const [name, status] of Object.entries(newEstado)) {
-    lines.push(`${statusEmoji(status)} **${traducir(name)}:**${status}`);
-  }
-
-  const impactLines = [];
-  const addedImpacts = new Set();
-  for (const [service, status] of Object.entries(newEstado)) {
-    if (!SERVICE_IMPACT[service]) continue;
-    const s = status.toLowerCase();
-    if (s.includes("caído") || s.includes("lento") || s.includes("error")) {
-      for (const impact of SERVICE_IMPACT[service]) {
-        if (!addedImpacts.has(impact)) {
-          impactLines.push(`• ${impact}`);
+    lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);   }    const impactLines = [];   const addedImpacts = new Set();   for (const [service, status] of Object.entries(newEstado)) {     if (!SERVICE_IMPACT[service]) continue;     const s = status.toLowerCase();     if (s.includes("caído") \vert{}\vert{} s.includes("lento") \vert{}\vert{} s.includes("error")) {       for (const impact of SERVICE_IMPACT[service]) {         if (!addedImpacts.has(impact)) {           impactLines.push(`• ${impact}`);
           addedImpacts.add(impact);
         }
       }
