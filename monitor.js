@@ -1,5 +1,9 @@
-import { chromium } from "playwright";
+import { chromium } from "playwright-extra";
+import stealth from "puppeteer-extra-plugin-stealth";
 import fs from "fs";
+
+// Activar plugin de evasión de detección de bots
+chromium.use(stealth());
 
 const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES;
 const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS;
@@ -111,18 +115,17 @@ function estadoGeneral(estado) {
 }
 
 async function getSteamStatus() {
+  // headless: false fuerza el renderizado con interfaz gráfica visual (manejado vía xvfb en Linux)
   const browser = await chromium.launch({ 
-    headless: true, 
+    headless: false, 
     args: [
       "--no-sandbox",
       "--disable-setuid-sandbox",
-      "--disable-blink-features=AutomationControlled",
-      "--disable-infobars"
+      "--disable-dev-shm-usage"
     ] 
   });
   
   const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
     viewport: { width: 1366, height: 768 },
     locale: 'es-ES',
     timezoneId: 'Europe/Madrid',
@@ -133,16 +136,11 @@ async function getSteamStatus() {
   
   const page = await context.newPage();
 
-  // Enmascarar la propiedad navigator.webdriver
-  await page.addInitScript(() => {
-    Object.defineProperty(navigator, 'webdriver', { get: () => false });
-  });
-
   try {
     await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
     
-    // Pausa técnica para permitir la verificación del desafío de Cloudflare
-    await page.waitForTimeout(5000);
+    // Tiempo de espera para la resolución del comprobador Turnstile / Cloudflare
+    await page.waitForTimeout(6000);
     
     await page.waitForSelector(".services", { timeout: 60000 });
   } catch (error) {
