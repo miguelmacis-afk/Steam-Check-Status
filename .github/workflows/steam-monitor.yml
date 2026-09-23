@@ -9,7 +9,6 @@ jobs:
   monitor:
     runs-on: ubuntu-latest
     
-    # Permisos necesarios para poder hacer commit y push de estado.json de vuelta al repositorio
     permissions:
       contents: write
 
@@ -20,27 +19,27 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '24' # Versión actual recomendada para minimizar avisos de depreciación
+          node-version: '22'
 
       - name: Install dependencies
         run: npm install
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps # Instala los navegadores y dependencias del sistema operativo Linux
+      - name: Install Playwright Chromium only
+        run: npx playwright install chromium --with-deps # Solo instala Chromium para acelerar la ejecución
 
       - name: Run Steam Monitor
         env:
-          FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
           WEBHOOK_URLS_CHANGES: ${{ secrets.WEBHOOK_URLS_CHANGES }}
           WEBHOOK_URL_ERRORS: ${{ secrets.WEBHOOK_URL_ERRORS }}
-        run: node monitor.js # Asegúrate de que coincida con el nombre de tu archivo principal (ej. monitor.js o index.js)
+        run: node monitor.js
         
       - name: Upload Debug Screenshot
-        if: failure() # Esto solo se ejecuta si el paso anterior falla
+        if: failure() # Se ejecuta si monitor.js falla
         uses: actions/upload-artifact@v4
         with:
           name: error-screenshot
-          path: error_screenshot.png
+          path: error_carga.png # Ruta corregida según monitor.js
+          if-no-files-found: ignore
 
       - name: Commit estado.json if changed
         run: |
