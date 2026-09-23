@@ -87,12 +87,19 @@ async function checkEndpoint(url, timeoutMs = 8000) {
     clearTimeout(id);
     const duration = Date.now() - start;
 
-    if (!res.ok && res.status !== 403) {
+    // Si devuelve 429 (Rate Limit) o 403 (Forbidden), la IP está bloqueada temporalmente pero el servidor no está caído
+    if (res.status === 429 || res.status === 403) {
+      return "Normal (Bloqueo IP)";
+    }
+
+    if (!res.ok) {
       return `Caído (HTTP ${res.status})`;
     }
+
     if (duration > 3500) {
       return `Lento (${duration}ms)`;
     }
+
     return "Normal";
   } catch (err) {
     clearTimeout(id);
