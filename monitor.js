@@ -1,9 +1,8 @@
 import { chromium } from "playwright";
 import fs from "fs";
 
-const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES; // lista separada por comas
-const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
-//const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URL_ERRORS; // webhook único para errores
+const WEBHOOK_URLS_CHANGES = process.env.WEBHOOK_URLS_CHANGES;
+const WEBHOOK_URL_ERRORS = process.env.WEBHOOK_URL_ERRORS;
 
 const estadoPath = "estado.json";
 
@@ -112,24 +111,44 @@ function estadoGeneral(estado) {
 }
 
 async function getSteamStatus() {
-  const browser = await chromium.launch({ headless: true, args: ["--no-sandbox"] });
-  
-  // 1. Crear un contexto con un User-Agent de un navegador real
-  const context = await browser.newContext({
-    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+  const browser = await chromium.launch({ 
+    headless: true, 
+    args: [
+      "--no-sandbox",
+      "--disable-setuid-sandbox",
+      "--disable-blink-features=AutomationControlled",
+      "--disable-infobars"
+    ] 
   });
   
-  // 2. Usar el contexto para abrir la página
-  const page = await context.newPage();
+  const context = await browser.newContext({
+    userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    viewport: { width: 1366, height: 768 },
+    locale: 'es-ES',
+    timezoneId: 'Europe/Madrid',
+    extraHTTPHeaders: {
+      'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8'
+    }
+  });
   
-  // 3. Usar domcontentloaded en lugar de networkidle
-  await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
+  const page = await context.newPage();
+
+  // Enmascarar la propiedad navigator.webdriver
+  await page.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => false });
+  });
+
   try {
+    await page.goto("https://steamstat.us/", { waitUntil: "domcontentloaded", timeout: 60000 });
+    
+    // Pausa técnica para permitir la verificación del desafío de Cloudflare
+    await page.waitForTimeout(5000);
+    
     await page.waitForSelector(".services", { timeout: 60000 });
   } catch (error) {
-    // Si falla, tomamos una captura para ver la pantalla de Cloudflare
-    await page.screenshot({ path: "error_carga.png" });
+    await page.screenshot({ path: "error_carga.png", fullPage: true });
     console.error("❌ No se encontró '.services'. Captura guardada como error_carga.png");
+    await browser.close();
     throw error; 
   }
 
@@ -176,7 +195,6 @@ async function main() {
   const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
   const { services, online, ingame, chartBuffer } = await getSteamStatus();
 
-  // Leer estado previo
   let prevEstado = {};
   try {
     if (fs.existsSync(estadoPath)) {
@@ -214,7 +232,7 @@ async function main() {
   }
 
   for (const [name, status] of Object.entries(filtered)) {
-    lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
+    lines.push(`${statusEmoji(status)} **${traducir(name)}:**${status}`);
   }
 
   const impactLines = [];
@@ -235,7 +253,6 @@ async function main() {
     lines.push(...impactLines);
   }
 
-  // Detectar cambios
   let changed = false;
   for (const svc of ALERT_SERVICES) {
     if (prevEstado[svc] !== newEstado[svc]) changed = true;
@@ -256,7 +273,6 @@ async function main() {
   }
 }
 
-// Captura errores y los envía al webhook de errores
 main().catch(async err => {
   console.error("❌ Error:", err);
   const msg = `🚨 Error en el monitor de Steam:\n\`\`\`${err.message || err}\`\`\``;
