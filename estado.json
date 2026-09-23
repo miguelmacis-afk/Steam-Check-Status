@@ -1,5 +1,8 @@
 {
   "Steam Store": "Normal",
   "Steam Community": "Normal",
-  "Steam Web API": "Normal"
+  "Steam Web API": "Normal",
+  "Steam Market": "Caído (HTTP 429)",
+  "Steam Support": "Normal",
+  "Connection Managers": "Normal"
 }
