@@ -88,7 +88,10 @@ async function checkEndpoint(url, timeoutMs = 8000) {
     const duration = Date.now() - start;
 
     if (!res.ok && res.status !== 403) {
-      return `Caído (HTTP ${res.status})`;     }     if (duration > 3500) {       return `Lento (${duration}ms)`;
+      return `Caído (HTTP ${res.status})`;
+    }
+    if (duration > 3500) {
+      return `Lento (${duration}ms)`;
     }
     return "Normal";
   } catch (err) {
@@ -163,7 +166,18 @@ async function main() {
   lines.push(`**${generalEmoji} Estado Ampliado de Servicios de Steam**\n`);
 
   for (const [name, status] of Object.entries(newEstado)) {
-    lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);   }    const impactLines = [];   const addedImpacts = new Set();   for (const [service, status] of Object.entries(newEstado)) {     if (!SERVICE_IMPACT[service]) continue;     const s = status.toLowerCase();     if (s.includes("caído") \vert{}\vert{} s.includes("lento") \vert{}\vert{} s.includes("error")) {       for (const impact of SERVICE_IMPACT[service]) {         if (!addedImpacts.has(impact)) {           impactLines.push(`• ${impact}`);
+    lines.push(`${statusEmoji(status)} **${traducir(name)}:**${status}`);
+  }
+
+  const impactLines = [];
+  const addedImpacts = new Set();
+  for (const [service, status] of Object.entries(newEstado)) {
+    if (!SERVICE_IMPACT[service]) continue;
+    const s = status.toLowerCase();
+    if (s.includes("caído") || s.includes("lento") || s.includes("error")) {
+      for (const impact of SERVICE_IMPACT[service]) {
+        if (!addedImpacts.has(impact)) {
+          impactLines.push(`• ${impact}`);
           addedImpacts.add(impact);
         }
       }
