@@ -2,7 +2,7 @@
   "Steam Store": "Normal",
   "Steam Community": "Normal",
   "Steam Web API": "Normal",
-  "Steam Market": "Caído (HTTP 429)",
+  "Steam Market": "Normal (Bloqueo IP)",
   "Steam Support": "Normal",
   "Connection Managers": "Normal"
 }
