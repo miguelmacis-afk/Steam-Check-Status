@@ -2,15 +2,15 @@ name: Steam Monitor
 
 on:
   schedule:
-    - cron: '*/10 * * * *' # Ejecutar cada 10 minutos
-  workflow_dispatch:
+    - cron: '*/10 * * * *' # Se ejecuta cada 10 minutos
+  workflow_dispatch: # Permite ejecutar el flujo manualmente desde GitHub
 
 jobs:
   monitor:
     runs-on: ubuntu-latest
-    
+
     permissions:
-      contents: write
+      contents: write # Necesario para hacer commit y push de estado.json
 
     steps:
       - name: Checkout repository
@@ -22,26 +22,13 @@ jobs:
           node-version: '22'
 
       - name: Install dependencies
-        run: |
-          npm install
-          npm install playwright-extra puppeteer-extra-plugin-stealth
+        run: npm install
 
-      - name: Install Playwright Chromium only
-        run: npx playwright install chromium --with-deps
-
-      - name: Run Steam Monitor with XVFB
+      - name: Run Steam Monitor
         env:
           WEBHOOK_URLS_CHANGES: ${{ secrets.WEBHOOK_URLS_CHANGES }}
           WEBHOOK_URL_ERRORS: ${{ secrets.WEBHOOK_URL_ERRORS }}
-        run: xvfb-run --auto-servernum node monitor.js
-        
-      - name: Upload Debug Screenshot
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-screenshot
-          path: error_carga.png
-          if-no-files-found: ignore
+        run: node monitor.js
 
       - name: Commit estado.json if changed
         run: |
