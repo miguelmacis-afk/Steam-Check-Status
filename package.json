@@ -1,9 +1,13 @@
 {
-  "name": "steam-check-status",
-  "version": "1.0.0",
+  "name": "steam-status-discord-monitor",
+  "version": "2.0.0",
+  "description": "Monitor en tiempo real de los servicios de Steam con alertas avanzadas mediante Webhooks de Discord y Embeds.",
+  "main": "index.js",
   "type": "module",
-  "private": true,
   "scripts": {
-    "start": "node monitor.js"
-  }
+    "start": "node index.js"
+  },
+  "keywords": ["steam", "discord", "monitor", "webhook", "nodejs"],
+  "author": "",
+  "license": "MIT"
 }
