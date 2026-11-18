@@ -41,8 +41,8 @@ const SERVICE_IMPACT = {
 function statusEmoji(status) {
   const s = status.toLowerCase();
   if (s.includes("normal") || s.includes("online") || s.includes("ok")) return "🟢";
-  if (s.includes("slow") || s.includes("degraded") || s.includes("timeout")) return "🟡";
-  if (s.includes("down") || s.includes("error") || s.includes("refused")) return "🔴";
+  if (s.includes("lento") || s.includes("timeout")) return "🟡";
+  if (s.includes("caído") || s.includes("error") || s.includes("sin conexión")) return "🔴";
   return "⚪";
 }
 
@@ -62,10 +62,10 @@ function estadoGeneral(estado) {
   let general = "🟢";
   for (const value of Object.values(estado)) {
     const s = value.toLowerCase();
-    if (s.includes("down") || s.includes("error")) {
+    if (s.includes("caído") || s.includes("error") || s.includes("sin conexión")) {
       return "🔴";
     }
-    if (s.includes("slow") || s.includes("timeout")) {
+    if (s.includes("lento") || s.includes("timeout")) {
       general = "🟡";
     }
   }
@@ -87,8 +87,8 @@ async function checkEndpoint(url, timeoutMs = 8000) {
     clearTimeout(id);
     const duration = Date.now() - start;
 
-    // Si devuelve 429 (Rate Limit) o 403 (Forbidden), la IP está bloqueada temporalmente pero el servidor no está caído
-    if (res.status === 429 || res.status === 403 || res.status === 429) {
+    // 429 (Rate Limit) o 403 (Forbidden) significan que el servidor responde pero nos bloquea temporalmente
+    if (res.status === 429 || res.status === 403) {
       return "Normal";
     }
 
@@ -146,12 +146,13 @@ async function sendToDiscord(message, webhooks = []) {
 }
 
 async function main() {
-  if (!WEBHOOK_URLS_CHANGES?.length || !WEBHOOK_URL_ERRORS) {
-    console.error("❌ WEBHOOKS no definidos");
+  const changeHooks = WEBHOOK_URLS_CHANGES ? WEBHOOK_URLS_CHANGES.split(",").map(h => h.trim()).filter(Boolean) : [];
+  
+  if (changeHooks.length === 0 || !WEBHOOK_URL_ERRORS) {
+    console.error("❌ WEBHOOKS no definidos correctamente");
     process.exit(1);
   }
 
-  const changeHooks = WEBHOOK_URLS_CHANGES.split(",");
   const { services } = await getSteamStatus();
 
   let prevEstado = {};
@@ -173,7 +174,7 @@ async function main() {
   lines.push(`**${generalEmoji} Estado Ampliado de Servicios de Steam**\n`);
 
   for (const [name, status] of Object.entries(newEstado)) {
-    lines.push(`${statusEmoji(status)} **${traducir(name)}:**${status}`);
+    lines.push(`${statusEmoji(status)} **${traducir(name)}:** ${status}`);
   }
 
   const impactLines = [];
@@ -181,7 +182,7 @@ async function main() {
   for (const [service, status] of Object.entries(newEstado)) {
     if (!SERVICE_IMPACT[service]) continue;
     const s = status.toLowerCase();
-    if (s.includes("caído") || s.includes("lento") || s.includes("error")) {
+    if (s.includes("caído") || s.includes("lento") || s.includes("error") || s.includes("sin conexión")) {
       for (const impact of SERVICE_IMPACT[service]) {
         if (!addedImpacts.has(impact)) {
           impactLines.push(`• ${impact}`);
