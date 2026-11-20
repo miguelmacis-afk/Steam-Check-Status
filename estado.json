@@ -1,7 +1,7 @@
 {
   "Steam Store": "Normal",
   "Steam Community": "Normal",
-  "Steam Web API": "Normal",
+  "Steam Web API": "Lento (Timeout)",
   "Steam Market": "Normal",
   "Steam Support": "Normal",
   "Connection Managers": "Normal"
